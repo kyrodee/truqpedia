@@ -1,0 +1,317 @@
+import { cookies } from "next/headers";
+import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
+import { FREE_MESSAGE_LIMIT } from "@/lib/constants";
+import { buildProviderMessages, streamWithFallback } from "@/lib/ai/model-router";
+import { searchWeb } from "@/lib/search/web-search";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { ChatMessage, SourceResult, StreamEvent } from "@/lib/types";
+import { recordUsageLog } from "@/lib/usage/metrics";
+import { toSse, truncate } from "@/lib/utils";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const chatSchema = z.object({
+  conversationId: z.string().uuid().nullable().optional(),
+  message: z.string().min(1).max(8000),
+  mode: z.enum(["speed", "deep"]).default("speed"),
+  webSearch: z.boolean().optional().default(false),
+  clientMessages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant", "system"]),
+        content: z.string(),
+      }),
+    )
+    .optional()
+    .default([]),
+  attachments: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(240),
+        type: z.string().max(160).default(""),
+        size: z.number().int().nonnegative().max(15 * 1024 * 1024),
+        text: z.string().max(60000).optional(),
+        truncated: z.boolean().optional(),
+      }),
+    )
+    .max(8)
+    .optional()
+    .default([]),
+});
+
+const guestCookieName = "truqpedia_guest_count";
+
+export async function POST(request: NextRequest) {
+  const parsed = chatSchema.safeParse(await request.json().catch(() => null));
+
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Mensagem invalida.", details: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const body = parsed.data;
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = supabase
+    ? await supabase.auth.getUser()
+    : { data: { user: null } };
+
+  const cookieStore = await cookies();
+  const guestCount = Number(cookieStore.get(guestCookieName)?.value ?? 0);
+
+  if (!user && guestCount >= FREE_MESSAGE_LIMIT) {
+    return NextResponse.json(
+      {
+        code: "FREE_LIMIT_REACHED",
+        error: "Limite gratuito atingido. Crie uma conta para continuar.",
+        limit: FREE_MESSAGE_LIMIT,
+      },
+      { status: 402 },
+    );
+  }
+
+  const encoder = new TextEncoder();
+  const headers = new Headers({
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  if (!user) {
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    headers.append(
+      "Set-Cookie",
+      `${guestCookieName}=${guestCount + 1}; Path=/; Max-Age=2592000; SameSite=Lax${secure}`,
+    );
+  }
+
+  let conversationId = body.conversationId ?? null;
+  let conversationTitle: string | undefined;
+  let persistedUserMessage = false;
+  let history: ChatMessage[] = body.clientMessages.slice(-20);
+
+  if (user && supabase) {
+    if (conversationId) {
+      const { data: existing, error } = await supabase
+        .from("conversations")
+        .select("id,title")
+        .eq("id", conversationId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (error || !existing) {
+        return NextResponse.json(
+          { error: "Conversa nao encontrada." },
+          { status: 404 },
+        );
+      }
+    } else {
+      conversationTitle = generateConversationTitle(body.message);
+      const { data: created, error } = await supabase
+        .from("conversations")
+        .insert({
+          user_id: user.id,
+          title: conversationTitle,
+          mode: body.mode,
+        })
+        .select("id,title")
+        .single();
+
+      if (error || !created) {
+        return NextResponse.json(
+          { error: "Nao foi possivel criar a conversa." },
+          { status: 500 },
+        );
+      }
+
+      conversationId = created.id;
+      conversationTitle = created.title;
+    }
+
+    const ownedConversationId = conversationId;
+
+    if (!ownedConversationId) {
+      return NextResponse.json(
+        { error: "Conversa invalida." },
+        { status: 500 },
+      );
+    }
+
+    const { data: previousMessages } = await supabase
+      .from("messages")
+      .select("role,content,created_at")
+      .eq("conversation_id", ownedConversationId)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(30);
+
+    history =
+      previousMessages?.map((message) => ({
+        role: message.role,
+        content: message.content,
+        createdAt: message.created_at,
+      })) ?? [];
+
+    const { error: messageError } = await supabase.from("messages").insert({
+      conversation_id: ownedConversationId,
+      user_id: user.id,
+      role: "user",
+      content: body.message,
+      metadata: {
+        web_search_requested: body.webSearch,
+        attachments: summarizeAttachments(body.attachments),
+      },
+    });
+
+    persistedUserMessage = !messageError;
+
+    await supabase
+      .from("conversations")
+      .update({ mode: body.mode, updated_at: new Date().toISOString() })
+      .eq("id", ownedConversationId)
+      .eq("user_id", user.id);
+  }
+
+  const sources = body.webSearch ? await searchWeb(body.message) : [];
+  const providerMessages = buildProviderMessages({
+    history,
+    userMessage: body.message,
+    sources,
+    attachments: body.attachments,
+  });
+
+  await recordUsageLog({
+    userId: user?.id,
+    conversationId,
+    eventType: "chat_message_created",
+    metadata: {
+      mode: body.mode,
+      webSearch: body.webSearch,
+      persistedUserMessage,
+      sourceCount: sources.length,
+      attachmentCount: body.attachments.length,
+    },
+  });
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let assistantContent = "";
+      let providerId: string | null = null;
+      let model: string | null = null;
+      const startedAt = Date.now();
+
+      const send = (event: StreamEvent) => {
+        controller.enqueue(encoder.encode(toSse(event)));
+      };
+
+      try {
+        if (conversationId) {
+          send({
+            type: "conversation",
+            conversationId,
+            title: conversationTitle,
+          });
+        }
+
+        if (sources.length > 0) {
+          send({ type: "sources", sources: serializeSources(sources) });
+        }
+
+        for await (const event of streamWithFallback({
+          mode: body.mode,
+          messages: providerMessages,
+          sources,
+          userId: user?.id,
+          conversationId,
+          abortSignal: request.signal,
+        })) {
+          if (event.type === "provider") {
+            providerId = event.provider;
+            model = event.model;
+          }
+
+          if (event.type === "token") {
+            assistantContent += event.token;
+          }
+
+          send(event);
+        }
+
+        if (assistantContent.trim() && user && supabase && conversationId) {
+          const { data: assistant } = await supabase
+            .from("messages")
+            .insert({
+              conversation_id: conversationId,
+              user_id: user.id,
+              role: "assistant",
+              content: assistantContent,
+              provider_id: providerId,
+              model,
+              latency_ms: Date.now() - startedAt,
+              token_count: Math.ceil(assistantContent.length / 4),
+              metadata: { sources },
+            })
+            .select("id")
+            .single();
+
+          await supabase
+            .from("conversations")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", conversationId)
+            .eq("user_id", user.id);
+
+          send({ type: "done", messageId: assistant?.id });
+        } else {
+          send({ type: "done" });
+        }
+      } catch (error) {
+        send({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Erro inesperado ao gerar resposta.",
+        });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, { headers });
+}
+
+function generateConversationTitle(message: string) {
+  return truncate(message, 54) || "Nova conversa";
+}
+
+function serializeSources(sources: SourceResult[]) {
+  return sources.map((source) => ({
+    title: source.title,
+    url: source.url,
+    snippet: source.snippet,
+    provider: source.provider,
+  }));
+}
+
+function summarizeAttachments(
+  attachments: Array<{
+    name: string;
+    type: string;
+    size: number;
+    truncated?: boolean;
+  }>,
+) {
+  return attachments.map((attachment) => ({
+    name: attachment.name,
+    type: attachment.type,
+    size: attachment.size,
+    truncated: attachment.truncated ?? false,
+  }));
+}

@@ -1,0 +1,128 @@
+# Truqpedia
+
+Truqpedia is a professional AI SaaS for auto parts, heavy vehicles, trucks, buses, road implements, diesel maintenance, technical sales and parts support.
+
+The app is built with Next.js 15, React 19, TypeScript, TailwindCSS v4, shadcn-style Radix components and Supabase Auth/PostgreSQL. It is ready for Vercel deployment and already includes a provider router for Groq, OpenRouter, Gemini, Cohere and Grok/xAI.
+
+## What is included
+
+- Chat-first responsive UI inspired by modern AI workspaces, with no landing page before the product.
+- Guest trial with configurable free-message limit.
+- Supabase Auth for sign up, login, password recovery and session management.
+- Persistent conversations, messages, rename/delete actions and sidebar history for authenticated users.
+- Streaming responses through Server-Sent Events.
+- Decoupled AI provider interface with automatic priority/fallback routing.
+- Admin panel for provider enablement, model names, priorities, timeouts and recent metrics.
+- Markdown output with tables, code blocks, links and source references.
+- Optional web search through Tavily, Brave Search or Serper.
+- Full Supabase SQL schema with RLS, indexes, triggers and future-ready knowledge/integration tables.
+
+## Project structure
+
+```txt
+src/
+  app/
+    api/
+      admin/              Admin metrics and provider settings APIs
+      chat/               Streaming chat endpoint
+      conversations/      Conversation CRUD
+    admin/                Admin dashboard route
+    auth/callback/        Supabase OAuth/email callback
+    page.tsx              Chat-first product screen
+  components/
+    admin/                Admin UI
+    auth/                 Login/signup/reset modal
+    chat/                 Chat shell and streaming UI
+    markdown/             Markdown renderer
+    ui/                   shadcn-style primitives
+  lib/
+    ai/                   Providers, streaming parsers and router
+    search/               Web search adapters
+    supabase/             Browser/server/admin clients and authz helpers
+    usage/                Metrics and usage logging
+supabase/
+  schema.sql              Complete PostgreSQL/RLS setup
+docs/
+  ARCHITECTURE.md         Maintenance and extension notes
+```
+
+## Local setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Create `.env.local` from `.env.example` and fill Supabase plus at least one AI provider key.
+
+3. In Supabase, open the SQL editor and execute:
+
+```txt
+supabase/schema.sql
+```
+
+4. Run the app:
+
+```bash
+npm run dev
+```
+
+5. Open `http://localhost:3000`.
+
+## Supabase configuration
+
+Required:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+The service role key is server-only. It is used for provider settings and operational logs. Never expose it to the browser.
+
+To promote a user to admin after signup:
+
+```sql
+update public.user_profiles
+set role = 'admin'
+where id = 'USER_UUID';
+```
+
+## AI providers
+
+Configure one or more keys:
+
+- `GROQ_API_KEY`
+- `OPENROUTER_API_KEY`
+- `GEMINI_API_KEY`
+- `COHERE_API_KEY`
+- `XAI_API_KEY`
+
+The router loads provider priorities and model names from `public.ai_provider_settings`. If Supabase service credentials are not available, it uses safe defaults from `src/lib/ai/model-router.ts`.
+
+## Web search
+
+Optional keys:
+
+- `TAVILY_API_KEY`
+- `BRAVE_SEARCH_API_KEY`
+- `SERPER_API_KEY`
+
+When the user enables online search, the chat endpoint queries the first available search provider, injects concise source context into the model prompt and streams source metadata back to the UI.
+
+## Vercel deploy
+
+1. Import the repository in Vercel.
+2. Set all required environment variables in Project Settings.
+3. Confirm the build command is `npm run build`.
+4. Set `NEXT_PUBLIC_APP_URL` to the production URL.
+5. In Supabase Auth, add the production URL and `/auth/callback` to allowed redirect URLs.
+
+## Validation
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+```
+
