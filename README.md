@@ -15,6 +15,7 @@ The app is built with Next.js 15, React 19, TypeScript, TailwindCSS v4, shadcn-s
 - Admin panel for provider enablement, model names, priorities, timeouts and recent metrics.
 - Markdown output with tables, code blocks, links and source references.
 - Optional web search through Tavily, Brave Search or Serper.
+- Production safety controls: bounded request payloads, per-user/IP chat rate limiting, same-origin auth redirects, security headers and a health endpoint.
 - Full Supabase SQL schema with RLS, indexes, triggers and future-ready knowledge/integration tables.
 
 ## Project structure
@@ -26,6 +27,7 @@ src/
       admin/              Admin metrics and provider settings APIs
       chat/               Streaming chat endpoint
       conversations/      Conversation CRUD
+      health/             Production readiness health check
     admin/                Admin dashboard route
     auth/callback/        Supabase OAuth/email callback
     page.tsx              Chat-first product screen
@@ -51,7 +53,7 @@ docs/
 1. Install dependencies:
 
 ```bash
-npm install
+npm ci
 ```
 
 2. Create `.env.local` from `.env.example` and fill Supabase plus at least one AI provider key.
@@ -114,15 +116,28 @@ When the user enables online search, the chat endpoint queries the first availab
 
 1. Import the repository in Vercel.
 2. Set all required environment variables in Project Settings.
-3. Confirm the build command is `npm run build`.
-4. Set `NEXT_PUBLIC_APP_URL` to the production URL.
-5. In Supabase Auth, add the production URL and `/auth/callback` to allowed redirect URLs.
+3. Set `NEXT_PUBLIC_APP_URL` to the production URL.
+4. Run `npm run validate:prod` with the production environment loaded.
+5. Confirm the build command is `npm run build`.
+6. In Supabase Auth, add the production URL and `/auth/callback` to allowed redirect URLs.
+7. After deploy, check `/api/health`. A production-ready deployment returns HTTP 200 with `status: "ok"`.
+
+## Production controls
+
+- `CHAT_RATE_LIMIT_REQUESTS` and `CHAT_RATE_LIMIT_WINDOW_MS` limit chat requests per authenticated user or client IP.
+- `MAX_CHAT_PAYLOAD_BYTES` rejects oversized chat payloads before model/provider work starts.
+- `WEB_SEARCH_TIMEOUT_MS` prevents optional search providers from hanging chat startup.
+- `NEXT_PUBLIC_FREE_MESSAGE_LIMIT` controls guest trial messages. The server enforces the limit.
+- `npm` overrides force `postcss` to a patched version across the dependency tree.
 
 ## Validation
 
 ```bash
+npm run test
 npm run lint
 npm run typecheck
 npm run build
+npm run ci
+npm audit --omit=dev
 ```
 

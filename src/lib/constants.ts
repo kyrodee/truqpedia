@@ -1,7 +1,9 @@
 export const APP_NAME = "Truqpedia";
 
-export const FREE_MESSAGE_LIMIT = Number(
-  process.env.NEXT_PUBLIC_FREE_MESSAGE_LIMIT ?? 5,
+export const FREE_MESSAGE_LIMIT = readPublicPositiveIntEnv(
+  "NEXT_PUBLIC_FREE_MESSAGE_LIMIT",
+  5,
+  { min: 0, max: 100 },
 );
 
 export const DEFAULT_SPEED_MODEL = {
@@ -25,4 +27,24 @@ export const SYSTEM_PROMPT = `Voce e o Truqpedia, uma inteligencia artificial es
 Atue como um especialista tecnico experiente. Seja objetivo, cuidadoso e pratico. Quando houver risco de incompatibilidade, peca os dados faltantes como chassi, ano/modelo, motor, eixo, cambio, medida ou codigo da peca. Ao sugerir aplicacoes ou equivalencias, destaque que a confirmacao por catalogo, chassi ou fabricante e essencial quando a decisao envolver compra, seguranca ou instalacao.
 
 Priorize respostas em portugues do Brasil, com linguagem profissional para vendedores, compradores, mecanicos, gestores de estoque e donos de lojas. Use tabelas quando isso facilitar comparacoes, listas quando houver procedimentos, e gere descricoes comerciais claras quando o usuario pedir conteudo para marketplace.`;
+
+function readPublicPositiveIntEnv(
+  name: string,
+  fallback: number,
+  options: { min: number; max: number },
+) {
+  const value = process.env[name];
+
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(options.max, Math.max(options.min, parsed));
+}
 

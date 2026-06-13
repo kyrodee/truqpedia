@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Bot,
-  Check,
+  Database,
   File,
   FileText,
   Gauge,
@@ -29,12 +29,20 @@ import { AuthModal } from "@/components/auth/auth-modal";
 import { MarkdownMessage } from "@/components/markdown/markdown-message";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -79,6 +87,20 @@ type TruqpediaShellProps = {
   initialConversationId: string | null;
 };
 
+type ProjectHealth = {
+  status?: "ok" | "degraded";
+  checks?: {
+    supabaseUrl?: boolean;
+    supabaseAnonKey?: boolean;
+    supabaseServiceRoleKey?: boolean;
+    appUrl?: boolean;
+    aiProvider?: boolean;
+    webSearch?: boolean;
+    database?: "ok" | "not_configured" | "error";
+    searchProviders?: string[];
+  };
+};
+
 const starterPrompts = [
   "Identifique aplicações para filtro diesel com código FS19732",
   "Compare cubo de roda, rolamento e retentor para carreta",
@@ -104,17 +126,56 @@ export function TruqpediaShell({
   const [isStreaming, setIsStreaming] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authReason, setAuthReason] = useState<"limit" | "auth">("auth");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [projectHealth, setProjectHealth] = useState<ProjectHealth | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const guestCount = useMemo(() => readGuestCount(), []);
+  const [guestCount, setGuestCount] = useState(0);
   const remainingGuestMessages = Math.max(0, FREE_MESSAGE_LIMIT - guestCount);
+
+  useEffect(() => {
+    setGuestCount(readGuestCount());
+  }, []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isStreaming]);
+
+  useEffect(() => {
+    if (!settingsOpen) {
+      return;
+    }
+
+    let active = true;
+    setSettingsLoading(true);
+
+    fetch("/api/health", { cache: "no-store" })
+      .then(async (response) => {
+        const data = (await response.json()) as ProjectHealth;
+
+        if (active) {
+          setProjectHealth(data);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setProjectHealth(null);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setSettingsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [settingsOpen]);
 
   async function submitMessage(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -177,6 +238,12 @@ export function TruqpediaShell({
       if (!response.ok || !response.body) {
         const data = await response.json().catch(() => null);
         throw new Error(data?.error ?? "Nao foi possivel enviar a mensagem.");
+      }
+
+      if (!user) {
+        setGuestCount((current) =>
+          Math.min(FREE_MESSAGE_LIMIT, Math.max(readGuestCount(), current + 1)),
+        );
       }
 
       await consumeStream(response, assistantMessage.id);
@@ -631,7 +698,7 @@ export function TruqpediaShell({
           />
         ) : null}
 
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="flex min-w-0 flex-1 flex-col font-sans">
           <header className="flex h-16 items-center justify-between border-b border-border bg-background/85 px-3 backdrop-blur-xl sm:px-5">
             <div className="flex min-w-0 items-center gap-2">
               <Tooltip>
@@ -697,6 +764,20 @@ export function TruqpediaShell({
                 <TooltipContent>Pesquisa online</TooltipContent>
               </Tooltip>
 
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label="Configurações"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setSettingsOpen(true)}
+                  >
+                    <Settings2 />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Configurações</TooltipContent>
+              </Tooltip>
+
               {!user ? (
                 <Button
                   variant="outline"
@@ -754,6 +835,30 @@ export function TruqpediaShell({
               className="mx-auto flex max-w-4xl items-end gap-2"
               onSubmit={submitMessage}
             >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(event) => void attachFiles(event.target.files)}
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label="Anexar arquivo"
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="size-12 shrink-0"
+                    disabled={attachments.length >= 8}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Paperclip />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Anexar arquivo</TooltipContent>
+              </Tooltip>
+
               <div className="min-w-0 flex-1 rounded-lg border border-border bg-input-shell p-2 shadow-sm">
                 <Textarea
                   value={input}
@@ -795,35 +900,12 @@ export function TruqpediaShell({
                 ) : null}
                 <div className="flex items-center justify-between gap-2 px-2 pb-1">
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={(event) => void attachFiles(event.target.files)}
-                    />
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 rounded px-1.5 py-1 transition-colors hover:text-foreground"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Paperclip className="size-3.5" />
-                      Anexar
-                    </button>
-                    <span className="text-border">|</span>
-                    <span className="inline-flex items-center gap-1">
-                      {webSearch ? (
-                        <>
-                          <Search className="size-3.5" />
-                          Online
-                        </>
-                      ) : (
-                        <>
-                          <Check className="size-3.5" />
-                          Contexto tecnico
-                        </>
-                      )}
-                    </span>
+                    {webSearch ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Search className="size-3.5" />
+                        Online
+                      </span>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground sm:hidden">
                     <button
@@ -852,6 +934,7 @@ export function TruqpediaShell({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
+                    aria-label="Enviar mensagem"
                     type="submit"
                     size="icon"
                     className="size-12"
@@ -876,8 +959,184 @@ export function TruqpediaShell({
           onOpenChange={setAuthOpen}
           reason={authReason}
         />
+        <ProjectSettingsDialog
+          health={projectHealth}
+          loading={settingsLoading}
+          mode={mode}
+          onModeChange={setMode}
+          onOpenChange={setSettingsOpen}
+          onWebSearchChange={setWebSearch}
+          open={settingsOpen}
+          user={user}
+          webSearch={webSearch}
+        />
       </div>
     </TooltipProvider>
+  );
+}
+
+function ProjectSettingsDialog({
+  health,
+  loading,
+  mode,
+  onModeChange,
+  onOpenChange,
+  onWebSearchChange,
+  open,
+  user,
+  webSearch,
+}: {
+  health: ProjectHealth | null;
+  loading: boolean;
+  mode: ChatMode;
+  onModeChange: (mode: ChatMode) => void;
+  onOpenChange: (open: boolean) => void;
+  onWebSearchChange: (enabled: boolean) => void;
+  open: boolean;
+  user: SessionUser | null;
+  webSearch: boolean;
+}) {
+  const checks = health?.checks;
+  const searchProviders = checks?.searchProviders ?? [];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Configurações</DialogTitle>
+          <DialogDescription>
+            Projeto, resposta e integrações do Truqpedia.
+          </DialogDescription>
+        </DialogHeader>
+
+        <Tabs defaultValue="geral" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="geral">Geral</TabsTrigger>
+            <TabsTrigger value="modelo">Modelo</TabsTrigger>
+            <TabsTrigger value="status">Status</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="geral" className="space-y-4">
+            <div className="rounded-md border border-border p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-medium">Pesquisa online</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {searchProviders.length
+                      ? searchProviders.join(", ")
+                      : "carregando"}
+                  </div>
+                </div>
+                <Switch checked={webSearch} onCheckedChange={onWebSearchChange} />
+              </div>
+            </div>
+
+            <div className="rounded-md border border-border p-4">
+              <div className="text-sm font-medium">Conta</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {user?.email ?? "Visitante"}
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="modelo" className="space-y-4">
+            <div className="rounded-md border border-border p-4">
+              <div className="mb-3 text-sm font-medium">Modo de resposta</div>
+              <div className="inline-flex rounded-md border border-border bg-muted p-1">
+                <button
+                  type="button"
+                  className={cn(
+                    "flex h-8 items-center gap-2 rounded px-3 text-xs font-medium",
+                    mode === "speed"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground",
+                  )}
+                  onClick={() => onModeChange("speed")}
+                >
+                  <Gauge className="size-4" />
+                  Rapido
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex h-8 items-center gap-2 rounded px-3 text-xs font-medium",
+                    mode === "deep"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground",
+                  )}
+                  onClick={() => onModeChange("deep")}
+                >
+                  <Sparkles className="size-4" />
+                  Profundo
+                </button>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="status">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <StatusItem
+                icon={<Database className="size-4" />}
+                label="Supabase"
+                ok={Boolean(checks?.supabaseUrl && checks.supabaseAnonKey)}
+                pending={loading}
+              />
+              <StatusItem
+                icon={<Database className="size-4" />}
+                label="Banco"
+                ok={checks?.database === "ok"}
+                pending={loading}
+              />
+              <StatusItem
+                icon={<Bot className="size-4" />}
+                label="IA"
+                ok={Boolean(checks?.aiProvider)}
+                pending={loading}
+              />
+              <StatusItem
+                icon={<Globe2 className="size-4" />}
+                label="Busca"
+                ok={Boolean(checks?.webSearch)}
+                pending={loading}
+              />
+            </div>
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function StatusItem({
+  icon,
+  label,
+  ok,
+  pending,
+}: {
+  icon: ReactNode;
+  label: string;
+  ok: boolean;
+  pending: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground">{icon}</span>
+        <span className="font-medium">{label}</span>
+      </div>
+      <span
+        className={cn(
+          "rounded px-2 py-1 text-xs",
+          pending
+            ? "bg-muted text-muted-foreground"
+            : ok
+              ? "bg-accent text-accent-foreground"
+              : "bg-destructive text-destructive-foreground",
+        )}
+      >
+        {pending ? "..." : ok ? "ok" : "erro"}
+      </span>
+    </div>
   );
 }
 
@@ -885,7 +1144,7 @@ function MessageBubble({ message }: { message: UiMessage }) {
   const isUser = message.role === "user";
 
   return (
-    <div className={cn("flex gap-3", isUser && "justify-end")}>
+    <div className={cn("flex gap-3 font-sans", isUser && "justify-end")}>
       {!isUser ? (
         <div className="mt-1 grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
           <Bot className="size-4" />

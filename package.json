@@ -6,7 +6,10 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
+    "ci": "npm run lint && npm run typecheck && npm run test && npm run build",
     "lint": "eslint",
+    "test": "vitest run",
+    "validate:prod": "node scripts/validate-production.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -45,6 +48,10 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.19",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "postcss": "^8.5.15"
   }
 }

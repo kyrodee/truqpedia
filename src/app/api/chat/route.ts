@@ -4,6 +4,13 @@ import { z } from "zod";
 import { FREE_MESSAGE_LIMIT } from "@/lib/constants";
 import { buildProviderMessages, streamWithFallback } from "@/lib/ai/model-router";
 import { searchWeb } from "@/lib/search/web-search";
+import {
+  CHAT_RATE_LIMIT_REQUESTS,
+  CHAT_RATE_LIMIT_WINDOW_MS,
+  MAX_CHAT_PAYLOAD_BYTES,
+} from "@/lib/server-config";
+import { getClientIp, checkRateLimit, rateLimitHeaders } from "@/lib/rate-limit";
+import { readJsonBody } from "@/lib/request";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { ChatMessage, SourceResult, StreamEvent } from "@/lib/types";
 import { recordUsageLog } from "@/lib/usage/metrics";
@@ -44,7 +51,13 @@ const chatSchema = z.object({
 const guestCookieName = "truqpedia_guest_count";
 
 export async function POST(request: NextRequest) {
-  const parsed = chatSchema.safeParse(await request.json().catch(() => null));
+  const jsonBody = await readJsonBody(request, MAX_CHAT_PAYLOAD_BYTES);
+
+  if (!jsonBody.ok) {
+    return jsonBody.response;
+  }
+
+  const parsed = chatSchema.safeParse(jsonBody.data);
 
   if (!parsed.success) {
     return NextResponse.json(
@@ -61,8 +74,21 @@ export async function POST(request: NextRequest) {
     ? await supabase.auth.getUser()
     : { data: { user: null } };
 
+  const rateLimit = checkRateLimit({
+    key: `chat:${user?.id ?? getClientIp(request)}`,
+    limit: CHAT_RATE_LIMIT_REQUESTS,
+    windowMs: CHAT_RATE_LIMIT_WINDOW_MS,
+  });
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Muitas solicitações. Tente novamente em instantes." },
+      { status: 429, headers: rateLimitHeaders(rateLimit) },
+    );
+  }
+
   const cookieStore = await cookies();
-  const guestCount = Number(cookieStore.get(guestCookieName)?.value ?? 0);
+  const guestCount = parseGuestCount(cookieStore.get(guestCookieName)?.value);
 
   if (!user && guestCount >= FREE_MESSAGE_LIMIT) {
     return NextResponse.json(
@@ -289,6 +315,16 @@ export async function POST(request: NextRequest) {
 
 function generateConversationTitle(message: string) {
   return truncate(message, 54) || "Nova conversa";
+}
+
+function parseGuestCount(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "0", 10);
+
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.max(0, parsed);
 }
 
 function serializeSources(sources: SourceResult[]) {

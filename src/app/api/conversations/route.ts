@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/request";
 import { requireUser } from "@/lib/supabase/authz";
 
 export const dynamic = "force-dynamic";
@@ -37,9 +38,13 @@ export async function POST(request: Request) {
     return response;
   }
 
-  const parsed = createConversationSchema.safeParse(
-    await request.json().catch(() => ({})),
-  );
+  const jsonBody = await readJsonBody(request, 16 * 1024);
+
+  if (!jsonBody.ok) {
+    return jsonBody.response;
+  }
+
+  const parsed = createConversationSchema.safeParse(jsonBody.data ?? {});
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Dados invalidos." }, { status: 400 });

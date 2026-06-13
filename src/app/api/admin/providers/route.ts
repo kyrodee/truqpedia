@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/supabase/authz";
 import { loadProviderConfigs } from "@/lib/ai/model-router";
+import { readJsonBody } from "@/lib/request";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,13 @@ export async function PATCH(request: Request) {
     return response;
   }
 
-  const parsed = providerSchema.safeParse(await request.json().catch(() => null));
+  const jsonBody = await readJsonBody(request, 16 * 1024);
+
+  if (!jsonBody.ok) {
+    return jsonBody.response;
+  }
+
+  const parsed = providerSchema.safeParse(jsonBody.data);
 
   if (!parsed.success) {
     return NextResponse.json(
