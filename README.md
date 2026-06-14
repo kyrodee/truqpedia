@@ -6,10 +6,13 @@ The app is built with Next.js 15, React 19, TypeScript, TailwindCSS v4, shadcn-s
 
 ## What is included
 
-- Chat-first responsive UI inspired by modern AI workspaces, with no landing page before the product.
+- Minimal landing page with an embedded AI trial, how-it-works section and plan cards.
+- Authenticated chat workspace at `/chat` inspired by modern AI workspaces.
 - Guest trial with configurable free-message limit.
 - Supabase Auth for sign up, login, password recovery and session management.
 - Persistent conversations, messages, rename/delete actions and sidebar history for authenticated users.
+- Project workspaces backed by `knowledge_collections`.
+- Message actions for copy, retry and opening answers in a side canvas.
 - Streaming responses through Server-Sent Events.
 - Decoupled AI provider interface with automatic priority/fallback routing.
 - Admin panel for provider enablement, model names, priorities, timeouts and recent metrics.
@@ -28,9 +31,11 @@ src/
       chat/               Streaming chat endpoint
       conversations/      Conversation CRUD
       health/             Production readiness health check
+      projects/           Project workspace CRUD
     admin/                Admin dashboard route
     auth/callback/        Supabase OAuth/email callback
-    page.tsx              Chat-first product screen
+    chat/                 Authenticated chat workspace
+    page.tsx              Landing page with AI trial
   components/
     admin/                Admin UI
     auth/                 Login/signup/reset modal
@@ -71,6 +76,9 @@ npm run dev
 ```
 
 5. Open `http://localhost:3000`.
+
+The landing page is available at `/`. The authenticated workspace is available
+at `/chat`.
 
 ## Supabase configuration
 

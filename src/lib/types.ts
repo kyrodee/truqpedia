@@ -36,6 +36,23 @@ export type ConversationSummary = {
   createdAt: string;
 };
 
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  description?: string;
+  conversationIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ArtifactSummary = {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  sourceMessageId?: string;
+};
+
 export type ProviderRuntimeConfig = {
   id: ProviderId;
   name: string;

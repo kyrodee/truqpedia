@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CHAT_MODE,
   DEFAULT_DEEP_MODEL,
   DEFAULT_SPEED_MODEL,
   SYSTEM_PROMPT,
@@ -120,7 +121,7 @@ export function buildProviderMessages(input: {
             (source, index) =>
               `[${index + 1}] ${source.title}\nURL: ${source.url}\nResumo: ${source.snippet}`,
           )
-          .join("\n\n")}\n\nQuando usar essas fontes, cite os links relevantes no final da resposta.`
+          .join("\n\n")}\n\nUse marcadores de citação no corpo da resposta, como [1] ou [2], sempre que uma afirmação vier dessas fontes. No final, inclua uma seção \"Fontes\" com a lista numerada dos links usados. Não invente fontes nem atribua uma fonte a uma afirmação que ela não sustenta.`
       : "";
 
   const messages: ProviderMessage[] = [
@@ -190,13 +191,14 @@ export async function* streamWithFallback(input: {
     }
 
     const startedAt = Date.now();
-    let model = input.mode === "speed" ? config.speedModel : config.deepModel;
+    const effectiveMode = DEFAULT_CHAT_MODE;
+    let model = config.deepModel;
     let assembled = "";
     let emittedAnyToken = false;
 
     try {
       const result = await provider.stream({
-        mode: input.mode,
+        mode: effectiveMode,
         messages: input.messages,
         sources: input.sources,
         config,
@@ -215,7 +217,7 @@ export async function* streamWithFallback(input: {
       await recordProviderMetric({
         providerId: provider.id,
         model,
-        mode: input.mode,
+        mode: effectiveMode,
         latencyMs: Date.now() - startedAt,
         success: true,
         userId: input.userId,
@@ -235,7 +237,7 @@ export async function* streamWithFallback(input: {
       await recordProviderMetric({
         providerId: provider.id,
         model,
-        mode: input.mode,
+        mode: effectiveMode,
         latencyMs: Date.now() - startedAt,
         success: false,
         errorMessage: message,

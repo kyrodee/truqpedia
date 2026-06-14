@@ -154,6 +154,24 @@ textarea {
   animation: typing-caret 0.9s steps(1) infinite;
 }
 
+.soft-enter {
+  animation: soft-enter 360ms ease both;
+}
+
+.hover-lift {
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
 @keyframes typing-caret {
   0%,
   42% {
@@ -162,5 +180,30 @@ textarea {
   43%,
   100% {
     opacity: 0;
+  }
+}
+
+@keyframes soft-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .soft-enter,
+  .hover-lift {
+    animation: none;
+    transition: none;
+  }
+
+  .hover-lift:hover {
+    transform: none;
+    box-shadow: none;
   }
 }

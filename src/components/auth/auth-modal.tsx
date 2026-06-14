@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { KeyRound, LogIn, Mail, UserPlus } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { Button } from "@/components/ui/button";
@@ -19,9 +19,18 @@ type AuthModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   reason?: "limit" | "auth";
+  initialView?: AuthView;
 };
 
-export function AuthModal({ open, onOpenChange, reason }: AuthModalProps) {
+type AuthView = "login" | "signup" | "reset";
+
+export function AuthModal({
+  initialView = "login",
+  open,
+  onOpenChange,
+  reason,
+}: AuthModalProps) {
+  const [tab, setTab] = useState<AuthView>(initialView);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -36,6 +45,12 @@ export function AuthModal({ open, onOpenChange, reason }: AuthModalProps) {
       return null;
     }
   }, []);
+
+  useEffect(() => {
+    if (open) {
+      setTab(initialView);
+    }
+  }, [initialView, open]);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -58,7 +73,7 @@ export function AuthModal({ open, onOpenChange, reason }: AuthModalProps) {
       return;
     }
 
-    window.location.reload();
+    window.location.href = "/chat";
   }
 
   async function signUp(event: FormEvent<HTMLFormElement>) {
@@ -75,7 +90,7 @@ export function AuthModal({ open, onOpenChange, reason }: AuthModalProps) {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/chat`,
         data: {
           full_name: fullName,
           company_name: companyName,
@@ -103,7 +118,7 @@ export function AuthModal({ open, onOpenChange, reason }: AuthModalProps) {
 
     setLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback`,
+      redirectTo: `${window.location.origin}/auth/callback?next=/chat`,
     });
     setLoading(false);
 
@@ -129,7 +144,11 @@ export function AuthModal({ open, onOpenChange, reason }: AuthModalProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="login" className="w-full">
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as AuthView)}
+          className="w-full"
+        >
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="login">
               <LogIn className="mr-2 size-4" />

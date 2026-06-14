@@ -80,6 +80,17 @@ export type UsageLogRow = {
   created_at: string;
 };
 
+export type KnowledgeCollectionRow = {
+  id: string;
+  owner_user_id: string | null;
+  name: string;
+  description: string | null;
+  visibility: "private" | "company" | "global";
+  metadata: Json;
+  created_at: string;
+  updated_at: string;
+};
+
 type Table<Row, Insert, Update> = {
   Row: Row;
   Insert: Insert;
@@ -199,6 +210,20 @@ export type Database = {
           created_at?: string;
         },
         Partial<UsageLogRow>
+      >;
+      knowledge_collections: Table<
+        KnowledgeCollectionRow,
+        {
+          id?: string;
+          owner_user_id?: string | null;
+          name: string;
+          description?: string | null;
+          visibility?: KnowledgeCollectionRow["visibility"];
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        },
+        Partial<Omit<KnowledgeCollectionRow, "id" | "owner_user_id" | "created_at">>
       >;
     };
     Views: Record<string, never>;

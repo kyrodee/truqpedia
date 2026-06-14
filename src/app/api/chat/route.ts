@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { FREE_MESSAGE_LIMIT } from "@/lib/constants";
+import { DEFAULT_CHAT_MODE, FREE_MESSAGE_LIMIT } from "@/lib/constants";
 import { buildProviderMessages, streamWithFallback } from "@/lib/ai/model-router";
 import { searchWeb } from "@/lib/search/web-search";
 import {
@@ -9,9 +9,14 @@ import {
   CHAT_RATE_LIMIT_WINDOW_MS,
   MAX_CHAT_PAYLOAD_BYTES,
 } from "@/lib/server-config";
+import {
+  isProjectCollection,
+  projectMetadataWithConversation,
+} from "@/lib/projects";
 import { getClientIp, checkRateLimit, rateLimitHeaders } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { Json } from "@/lib/supabase/database.types";
 import type { ChatMessage, SourceResult, StreamEvent } from "@/lib/types";
 import { recordUsageLog } from "@/lib/usage/metrics";
 import { toSse, truncate } from "@/lib/utils";
@@ -21,8 +26,9 @@ export const dynamic = "force-dynamic";
 
 const chatSchema = z.object({
   conversationId: z.string().uuid().nullable().optional(),
+  projectId: z.string().uuid().nullable().optional(),
   message: z.string().min(1).max(8000),
-  mode: z.enum(["speed", "deep"]).default("speed"),
+  mode: z.enum(["speed", "deep"]).default(DEFAULT_CHAT_MODE),
   webSearch: z.boolean().optional().default(false),
   clientMessages: z
     .array(
@@ -66,7 +72,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = parsed.data;
+  const body = { ...parsed.data, mode: DEFAULT_CHAT_MODE };
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -121,8 +127,27 @@ export async function POST(request: NextRequest) {
   let conversationTitle: string | undefined;
   let persistedUserMessage = false;
   let history: ChatMessage[] = body.clientMessages.slice(-20);
+  let project: { id: string; metadata: Json } | null = null;
 
   if (user && supabase) {
+    if (body.projectId) {
+      const { data: projectData, error: projectError } = await supabase
+        .from("knowledge_collections")
+        .select("id,metadata")
+        .eq("id", body.projectId)
+        .eq("owner_user_id", user.id)
+        .maybeSingle();
+
+      if (projectError || !projectData || !isProjectCollection(projectData)) {
+        return NextResponse.json(
+          { error: "Projeto nao encontrado." },
+          { status: 404 },
+        );
+      }
+
+      project = projectData;
+    }
+
     if (conversationId) {
       const { data: existing, error } = await supabase
         .from("conversations")
@@ -158,6 +183,20 @@ export async function POST(request: NextRequest) {
 
       conversationId = created.id;
       conversationTitle = created.title;
+
+      if (project) {
+        await supabase
+          .from("knowledge_collections")
+          .update({
+            metadata: projectMetadataWithConversation(
+              project.metadata,
+              created.id,
+            ),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", project.id)
+          .eq("owner_user_id", user.id);
+      }
     }
 
     const ownedConversationId = conversationId;
@@ -219,6 +258,7 @@ export async function POST(request: NextRequest) {
     metadata: {
       mode: body.mode,
       webSearch: body.webSearch,
+      projectId: body.projectId,
       persistedUserMessage,
       sourceCount: sources.length,
       attachmentCount: body.attachments.length,
