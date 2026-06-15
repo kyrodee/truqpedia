@@ -105,3 +105,46 @@ export async function POST(request: Request) {
   return NextResponse.json({ conversation: data }, { status: 201 });
 }
 
+export async function DELETE() {
+  const { supabase, user, response } = await requireUser();
+
+  if (response || !supabase || !user) {
+    return response;
+  }
+
+  const { data: collections } = await supabase
+    .from("knowledge_collections")
+    .select("id,metadata")
+    .eq("owner_user_id", user.id);
+
+  for (const collection of collections?.filter(isProjectCollection) ?? []) {
+    await supabase
+      .from("knowledge_collections")
+      .update({
+        metadata: {
+          ...(isJsonObject(collection.metadata) ? collection.metadata : {}),
+          type: "project",
+          conversation_ids: [],
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", collection.id)
+      .eq("owner_user_id", user.id);
+  }
+
+  const { error } = await supabase
+    .from("conversations")
+    .delete()
+    .eq("user_id", user.id);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+function isJsonObject(value: Json): value is Record<string, Json | undefined> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+

@@ -5,6 +5,9 @@ export const metadata: Metadata = {
   title: "Truqpedia",
   description:
     "IA profissional para autopecas, caminhoes, onibus e mecanica diesel.",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({

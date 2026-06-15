@@ -3,7 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { DEFAULT_CHAT_MODE, FREE_MESSAGE_LIMIT } from "@/lib/constants";
 import { buildProviderMessages, streamWithFallback } from "@/lib/ai/model-router";
+import { logError, logInfo } from "@/lib/logger";
 import { searchWeb } from "@/lib/search/web-search";
+import { decideWebSearch } from "@/lib/search/auto-search";
 import {
   CHAT_RATE_LIMIT_REQUESTS,
   CHAT_RATE_LIMIT_WINDOW_MS,
@@ -29,7 +31,7 @@ const chatSchema = z.object({
   projectId: z.string().uuid().nullable().optional(),
   message: z.string().min(1).max(8000),
   mode: z.enum(["speed", "deep"]).default(DEFAULT_CHAT_MODE),
-  webSearch: z.boolean().optional().default(false),
+  webSearch: z.union([z.boolean(), z.literal("auto")]).optional().default("auto"),
   clientMessages: z
     .array(
       z.object({
@@ -52,6 +54,16 @@ const chatSchema = z.object({
     .max(8)
     .optional()
     .default([]),
+  preferences: z
+    .object({
+      displayName: z.string().max(80).optional(),
+      referenceStyle: z.string().max(120).optional(),
+      behavior: z.string().max(700).optional(),
+      responseStyle: z.string().max(240).optional(),
+      businessContext: z.string().max(500).optional(),
+      customInstructions: z.string().max(700).optional(),
+    })
+    .optional(),
 });
 
 const guestCookieName = "truqpedia_guest_count";
@@ -231,6 +243,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         web_search_requested: body.webSearch,
         attachments: summarizeAttachments(body.attachments),
+        assistant_preferences: body.preferences,
       },
     });
 
@@ -243,34 +256,18 @@ export async function POST(request: NextRequest) {
       .eq("user_id", user.id);
   }
 
-  const sources = body.webSearch ? await searchWeb(body.message) : [];
-  const providerMessages = buildProviderMessages({
-    history,
-    userMessage: body.message,
-    sources,
-    attachments: body.attachments,
-  });
-
-  await recordUsageLog({
-    userId: user?.id,
-    conversationId,
-    eventType: "chat_message_created",
-    metadata: {
-      mode: body.mode,
-      webSearch: body.webSearch,
-      projectId: body.projectId,
-      persistedUserMessage,
-      sourceCount: sources.length,
-      attachmentCount: body.attachments.length,
-    },
-  });
-
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let assistantContent = "";
       let providerId: string | null = null;
       let model: string | null = null;
+      let sources: SourceResult[] = [];
       const startedAt = Date.now();
+      const searchDecision = decideWebSearch({
+        message: body.message,
+        attachments: body.attachments,
+        requested: body.webSearch,
+      });
 
       const send = (event: StreamEvent) => {
         controller.enqueue(encoder.encode(toSse(event)));
@@ -285,9 +282,66 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        for (const label of searchDecision.activities.slice(0, 2)) {
+          send({ type: "activity", label });
+        }
+
+        if (searchDecision.enabled) {
+          send({
+            type: "activity",
+            label: "Pesquisando",
+            detail: searchDecision.reason,
+          });
+          sources = await searchWeb(searchDecision.query);
+          send({
+            type: "activity",
+            label: sources.length
+              ? `Encontrei ${sources.length} fontes para conferir`
+              : "Não encontrei fontes confiáveis nesta busca",
+          });
+        } else {
+          send({
+            type: "activity",
+            label: "Respondendo com base no contexto da conversa",
+            detail: searchDecision.reason,
+          });
+        }
+
         if (sources.length > 0) {
           send({ type: "sources", sources: serializeSources(sources) });
         }
+
+        const providerMessages = buildProviderMessages({
+          history,
+          userMessage: body.message,
+          sources,
+          attachments: body.attachments,
+          preferences: body.preferences,
+        });
+
+        await recordUsageLog({
+          userId: user?.id,
+          conversationId,
+          eventType: "chat_message_created",
+          metadata: {
+            mode: body.mode,
+            webSearch: searchDecision.enabled,
+            searchReason: searchDecision.reason,
+            projectId: body.projectId,
+            persistedUserMessage,
+            sourceCount: sources.length,
+            attachmentCount: body.attachments.length,
+          },
+        });
+
+        logInfo("chat.stream.started", {
+          userId: user?.id ?? "guest",
+          conversationId,
+          searchEnabled: searchDecision.enabled,
+          sourceCount: sources.length,
+        });
+
+        send({ type: "activity", label: "Gerando resposta técnica" });
 
         for await (const event of streamWithFallback({
           mode: body.mode,
@@ -337,6 +391,10 @@ export async function POST(request: NextRequest) {
           send({ type: "done" });
         }
       } catch (error) {
+        logError("chat.stream.failed", error, {
+          userId: user?.id ?? "guest",
+          conversationId,
+        });
         send({
           type: "error",
           message:

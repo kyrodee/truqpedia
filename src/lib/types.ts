@@ -28,6 +28,15 @@ export type UploadedAttachment = {
   truncated?: boolean;
 };
 
+export type AssistantPreferences = {
+  displayName?: string;
+  referenceStyle?: string;
+  behavior?: string;
+  responseStyle?: string;
+  businessContext?: string;
+  customInstructions?: string;
+};
+
 export type ConversationSummary = {
   id: string;
   title: string;
@@ -78,12 +87,14 @@ export type ChatRequestBody = {
   conversationId?: string | null;
   message: string;
   mode: ChatMode;
-  webSearch?: boolean;
+  webSearch?: boolean | "auto";
   clientMessages?: ChatMessage[];
   attachments?: UploadedAttachment[];
+  preferences?: AssistantPreferences;
 };
 
 export type StreamEvent =
+  | { type: "activity"; label: string; detail?: string }
   | { type: "conversation"; conversationId: string; title?: string }
   | { type: "sources"; sources: SourceResult[] }
   | { type: "provider"; provider: ProviderId; model: string }

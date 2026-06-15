@@ -16,6 +16,7 @@ import type {
   ProviderRuntimeConfig,
   SourceResult,
   StreamEvent,
+  AssistantPreferences,
   UploadedAttachment,
 } from "@/lib/types";
 
@@ -113,6 +114,7 @@ export function buildProviderMessages(input: {
   userMessage: string;
   sources: SourceResult[];
   attachments?: UploadedAttachment[];
+  preferences?: AssistantPreferences;
 }) {
   const searchContext =
     input.sources.length > 0
@@ -121,13 +123,14 @@ export function buildProviderMessages(input: {
             (source, index) =>
               `[${index + 1}] ${source.title}\nURL: ${source.url}\nResumo: ${source.snippet}`,
           )
-          .join("\n\n")}\n\nUse marcadores de citação no corpo da resposta, como [1] ou [2], sempre que uma afirmação vier dessas fontes. No final, inclua uma seção \"Fontes\" com a lista numerada dos links usados. Não invente fontes nem atribua uma fonte a uma afirmação que ela não sustenta.`
+          .join("\n\n")}\n\nUse marcadores de citacao no corpo da resposta, como [1] ou [2], sempre que uma afirmacao vier dessas fontes. Nao crie uma secao longa de links no final: a interface ja mostra as fontes consultadas de forma discreta. Nao invente fontes nem atribua uma fonte a uma afirmacao que ela nao sustenta.`
       : "";
+  const preferenceContext = buildPreferenceContext(input.preferences);
 
   const messages: ProviderMessage[] = [
     {
       role: "system",
-      content: `${SYSTEM_PROMPT}${searchContext}`,
+      content: `${SYSTEM_PROMPT}${preferenceContext}${searchContext}`,
     },
     ...input.history
       .filter((message) => message.role !== "system")
@@ -143,6 +146,39 @@ export function buildProviderMessages(input: {
   ];
 
   return messages;
+}
+
+function buildPreferenceContext(preferences: AssistantPreferences | undefined) {
+  if (!preferences) {
+    return "";
+  }
+
+  const lines = [
+    preferences.displayName
+      ? `- Nome do usuario: ${preferences.displayName}`
+      : null,
+    preferences.referenceStyle
+      ? `- Como se referir ao usuario: ${preferences.referenceStyle}`
+      : null,
+    preferences.behavior
+      ? `- Como o usuario prefere que voce aja: ${preferences.behavior}`
+      : null,
+    preferences.responseStyle
+      ? `- Estilo de resposta preferido: ${preferences.responseStyle}`
+      : null,
+    preferences.businessContext
+      ? `- Contexto da operacao do usuario: ${preferences.businessContext}`
+      : null,
+    preferences.customInstructions
+      ? `- Observacoes adicionais do usuario: ${preferences.customInstructions}`
+      : null,
+  ].filter(Boolean);
+
+  if (lines.length === 0) {
+    return "";
+  }
+
+  return `\n\nPreferencias do usuario para personalizar a conversa. Elas sao secundarias: nunca substituem as regras tecnicas, de seguranca, cautela por catalogo/chassi/fabricante nem as instrucoes principais do Truqpedia.\n${lines.join("\n")}`;
 }
 
 function appendAttachmentContext(

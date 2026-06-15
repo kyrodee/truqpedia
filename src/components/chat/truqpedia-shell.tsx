@@ -1,20 +1,19 @@
 "use client";
 
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
+  ArrowRight,
   BadgeCheck,
   Bot,
-  CheckCircle2,
   ClipboardList,
   Copy,
-  Database,
   Download,
   ExternalLink,
   File,
   FileText,
   Folder,
   FolderPlus,
-  Globe2,
   LogIn,
   LogOut,
   Menu,
@@ -29,14 +28,12 @@ import {
   Send,
   Settings2,
   ShieldCheck,
-  Sparkles,
   Trash2,
   Truck,
   UserRound,
   Wrench,
   X,
 } from "lucide-react";
-import { AuthModal } from "@/components/auth/auth-modal";
 import { MarkdownMessage } from "@/components/markdown/markdown-message";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,7 +51,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -67,6 +63,7 @@ import { TypingIndicator } from "@/components/chat/typing-indicator";
 import { DEFAULT_CHAT_MODE, FREE_MESSAGE_LIMIT } from "@/lib/constants";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type {
+  AssistantPreferences,
   ChatMessage,
   ChatMode,
   ArtifactSummary,
@@ -92,9 +89,8 @@ type UiMessage = ChatMessage & {
   id: string;
   status?: "searching" | "streaming" | "error" | "done";
   sources?: SourceResult[];
-  provider?: string;
-  model?: string;
   attachments?: UploadedAttachment[];
+  activities?: Array<{ label: string; detail?: string }>;
 };
 
 type TruqpediaShellProps = {
@@ -104,20 +100,7 @@ type TruqpediaShellProps = {
   initialMessages: UiMessage[];
   initialConversationId: string | null;
   initialProjectId: string | null;
-};
-
-type ProjectHealth = {
-  status?: "ok" | "degraded";
-  checks?: {
-    supabaseUrl?: boolean;
-    supabaseAnonKey?: boolean;
-    supabaseServiceRoleKey?: boolean;
-    appUrl?: boolean;
-    aiProvider?: boolean;
-    webSearch?: boolean;
-    database?: "ok" | "not_configured" | "error";
-    searchProviders?: string[];
-  };
+  initialAssistantPreferences: AssistantPreferences;
 };
 
 const workflowPrompts = [
@@ -127,7 +110,6 @@ const workflowPrompts = [
     description: "Código, veículo, ano, motor e alertas antes da venda.",
     prompt:
       "Aja como especialista de balcão em peças pesadas. Preciso confirmar a aplicação desta peça. Responda com: resumo objetivo, compatibilidades prováveis, dados que faltam para cravar, riscos de vender errado e checklist do que pedir ao cliente antes de fechar.",
-    webSearch: true,
   },
   {
     icon: Search,
@@ -135,7 +117,6 @@ const workflowPrompts = [
     description: "Compare códigos e marcas sem assumir compatibilidade.",
     prompt:
       "Compare estes códigos/marcas de peça como um comprador técnico. Não assuma equivalência sem prova. Monte uma tabela com função da peça, possíveis equivalências, diferenças críticas, medidas/dados para conferir, risco de incompatibilidade e recomendação final.",
-    webSearch: true,
   },
   {
     icon: ClipboardList,
@@ -143,7 +124,6 @@ const workflowPrompts = [
     description: "Descrição de marketplace com cautela e bons filtros.",
     prompt:
       "Crie um anúncio pronto para marketplace de peça pesada. Entregue: título forte, descrição clara, benefícios práticos, aplicações prováveis sem prometer compatibilidade, perguntas para confirmar antes da compra e palavras-chave de busca.",
-    webSearch: false,
   },
   {
     icon: ShieldCheck,
@@ -151,7 +131,6 @@ const workflowPrompts = [
     description: "Perguntas para evitar devolução e compra errada.",
     prompt:
       "Monte um checklist de compra para evitar devolução. Separe por: perguntas ao cliente, conferência visual, medidas/códigos, sinais de alerta, quando pedir chassi/catálogo e mensagem curta para enviar ao cliente no WhatsApp.",
-    webSearch: false,
   },
 ];
 
@@ -162,6 +141,7 @@ export function TruqpediaShell({
   initialMessages,
   initialConversationId,
   initialProjectId,
+  initialAssistantPreferences,
 }: TruqpediaShellProps) {
   const [conversations, setConversations] =
     useState<UiConversation[]>(initialConversations);
@@ -178,18 +158,18 @@ export function TruqpediaShell({
   const [artifactOpen, setArtifactOpen] = useState(false);
   const [input, setInput] = useState("");
   const mode: ChatMode = DEFAULT_CHAT_MODE;
-  const [webSearch, setWebSearch] = useState(false);
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authReason, setAuthReason] = useState<"limit" | "auth">("auth");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [assistantPreferences, setAssistantPreferences] =
+    useState<AssistantPreferences>(initialAssistantPreferences);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
+  const [deletingAllChats, setDeletingAllChats] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [projectSaving, setProjectSaving] = useState(false);
-  const [projectHealth, setProjectHealth] = useState<ProjectHealth | null>(null);
-  const [settingsLoading, setSettingsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -219,41 +199,13 @@ export function TruqpediaShell({
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isStreaming]);
 
-  useEffect(() => {
-    if (!settingsOpen) {
-      return;
-    }
-
-    let active = true;
-    setSettingsLoading(true);
-
-    fetch("/api/health", { cache: "no-store" })
-      .then(async (response) => {
-        const data = (await response.json()) as ProjectHealth;
-
-        if (active) {
-          setProjectHealth(data);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setProjectHealth(null);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setSettingsLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [settingsOpen]);
-
   async function submitMessage(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    const cleanInput = input.trim();
+    const cleanInput =
+      input.trim() ||
+      (attachments.length > 0
+        ? "Analise os arquivos anexados e me ajude com uma orientação técnica."
+        : "");
 
     if (!cleanInput || isStreaming) {
       return;
@@ -285,7 +237,8 @@ export function TruqpediaShell({
       role: "assistant",
       content: "",
       createdAt: new Date().toISOString(),
-      status: webSearch ? "searching" : "streaming",
+      status: "searching",
+      activities: [],
     };
 
     const nextMessages = [...history, userMessage, assistantMessage];
@@ -304,8 +257,9 @@ export function TruqpediaShell({
           projectId: activeProjectId,
           message: cleanInput,
           mode,
-          webSearch,
+          webSearch: "auto",
           attachments: sentAttachments,
+          preferences: cleanAssistantPreferences(assistantPreferences),
           clientMessages: user ? undefined : history.slice(-16),
         }),
         signal: controller.signal,
@@ -315,9 +269,8 @@ export function TruqpediaShell({
         setMessages(history);
         setInput(cleanInput);
         setAttachments(sentAttachments);
-        setAuthReason("limit");
-        setAuthOpen(true);
         setStatus("Crie uma conta para continuar conversando.");
+        window.location.href = "/cadastro?next=/chat";
         return;
       }
 
@@ -392,6 +345,23 @@ export function TruqpediaShell({
 
         const event = JSON.parse(line.slice(5).trim()) as StreamEvent;
 
+        if (event.type === "activity") {
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantId
+                ? {
+                    ...message,
+                    activities: [
+                      ...(message.activities ?? []),
+                      { label: event.label, detail: event.detail },
+                    ],
+                    status: "searching",
+                  }
+                : message,
+            ),
+          );
+        }
+
         if (event.type === "conversation") {
           setActiveConversationId(event.conversationId);
           if (activeProjectId) {
@@ -437,14 +407,6 @@ export function TruqpediaShell({
           currentSources = event.sources;
           updateMessage(assistantId, {
             sources: currentSources,
-            status: "streaming",
-          });
-        }
-
-        if (event.type === "provider") {
-          updateMessage(assistantId, {
-            provider: event.provider,
-            model: event.model,
             status: "streaming",
           });
         }
@@ -560,8 +522,6 @@ export function TruqpediaShell({
         id: string;
         role: "user" | "assistant" | "system";
         content: string;
-        provider_id?: string | null;
-        model?: string | null;
         metadata?: {
           sources?: SourceResult[];
           attachments?: UploadedAttachment[];
@@ -576,8 +536,6 @@ export function TruqpediaShell({
         id: message.id,
         role: message.role,
         content: message.content,
-        provider: message.provider_id ?? undefined,
-        model: message.model ?? undefined,
         sources: message.metadata?.sources,
         attachments: message.metadata?.attachments,
         createdAt: message.created_at,
@@ -712,12 +670,8 @@ export function TruqpediaShell({
     setStatus("Mensagem copiada.");
   }
 
-  function applyWorkflowPrompt(prompt: string, promptWebSearch: boolean) {
+  function applyWorkflowPrompt(prompt: string) {
     setInput(prompt);
-
-    if (promptWebSearch) {
-      setWebSearch(true);
-    }
   }
 
   function openArtifactFromMessage(message: UiMessage) {
@@ -859,6 +813,76 @@ export function TruqpediaShell({
       if (activeConversationId === conversation.id) {
         newConversation();
       }
+    }
+  }
+
+  async function saveAssistantPreferences() {
+    if (!user) {
+      return;
+    }
+
+    setPreferencesSaving(true);
+    setSettingsStatus(null);
+
+    try {
+      const response = await fetch("/api/user-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assistantPreferences: cleanAssistantPreferences(assistantPreferences),
+        }),
+      });
+
+      if (!response.ok) {
+        setSettingsStatus("Não foi possível salvar as preferências.");
+        return;
+      }
+
+      setSettingsStatus("Preferências salvas.");
+    } catch {
+      setSettingsStatus("Não foi possível salvar as preferências.");
+    } finally {
+      setPreferencesSaving(false);
+    }
+  }
+
+  async function deleteAllConversations() {
+    if (!user || deletingAllChats) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Apagar todas as conversas? Esta ação remove o histórico de chat da sua conta.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingAllChats(true);
+    setSettingsStatus(null);
+
+    try {
+      const response = await fetch("/api/conversations", {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        setSettingsStatus("Não foi possível apagar as conversas.");
+        return;
+      }
+
+      setConversations([]);
+      setMessages([]);
+      setActiveConversationId(null);
+      setProjects((current) =>
+        current.map((project) => ({ ...project, conversationIds: [] })),
+      );
+      setSettingsStatus("Conversas apagadas.");
+    } catch {
+      setSettingsStatus("Não foi possível apagar as conversas.");
+    } finally {
+      setDeletingAllChats(false);
     }
   }
 
@@ -1086,13 +1110,12 @@ export function TruqpediaShell({
                 <Button
                   variant="outline"
                   className="mt-3 w-full justify-start"
-                  onClick={() => {
-                    setAuthReason("auth");
-                    setAuthOpen(true);
-                  }}
+                  asChild
                 >
-                  <LogIn />
-                  Entrar
+                  <Link href="/login?next=/chat">
+                    <LogIn />
+                    Entrar
+                  </Link>
                 </Button>
               </div>
             )}
@@ -1173,22 +1196,7 @@ export function TruqpediaShell({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="hidden h-10 items-center gap-2 rounded-md border border-border bg-background px-3 text-xs font-medium text-muted-foreground sm:flex">
-                <Sparkles className="size-4 text-primary" />
-                Qualidade máxima
-              </div>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex h-10 items-center gap-2 rounded-md border border-border bg-background px-3">
-                    <Globe2 className="size-4 text-muted-foreground" />
-                    <Switch checked={webSearch} onCheckedChange={setWebSearch} />
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>Pesquisa online</TooltipContent>
-              </Tooltip>
-
+            <div className="flex items-center gap-1">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -1220,22 +1228,18 @@ export function TruqpediaShell({
               ) : null}
 
               {!user ? (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setAuthReason("auth");
-                    setAuthOpen(true);
-                  }}
-                >
-                  <LogIn />
-                  Entrar
+                <Button variant="outline" asChild>
+                  <Link href="/login?next=/chat">
+                    <LogIn />
+                    Entrar
+                  </Link>
                 </Button>
               ) : null}
             </div>
           </header>
 
           <section className="flex-1 overflow-y-auto">
-            <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-4 py-6 sm:px-6">
+            <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-4 py-6 sm:px-6">
               {messages.length === 0 ? (
                 <div className="soft-enter flex flex-1 flex-col justify-center gap-6 py-10">
                   <div className="space-y-3">
@@ -1258,9 +1262,7 @@ export function TruqpediaShell({
                       <button
                         key={item.title}
                         className="hover-lift rounded-md border border-border bg-background p-4 text-left shadow-sm"
-                        onClick={() =>
-                          applyWorkflowPrompt(item.prompt, item.webSearch)
-                        }
+                        onClick={() => applyWorkflowPrompt(item.prompt)}
                       >
                         <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
                           <item.icon className="size-4 text-primary" />
@@ -1269,12 +1271,6 @@ export function TruqpediaShell({
                         <span className="mt-2 block text-sm leading-6 text-muted-foreground">
                           {item.description}
                         </span>
-                        {item.webSearch ? (
-                          <span className="mt-3 inline-flex items-center gap-1 rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
-                            <Globe2 className="size-3.5" />
-                            usa pesquisa online
-                          </span>
-                        ) : null}
                       </button>
                     ))}
                   </div>
@@ -1290,7 +1286,7 @@ export function TruqpediaShell({
                     </div>
                     <div className="flex gap-2">
                       <Search className="mt-0.5 size-4 shrink-0 text-primary" />
-                      <span>Ative online quando precisar de fonte auditável.</span>
+                      <span>A pesquisa aparece durante a resposta quando for necessária.</span>
                     </div>
                   </div>
                 </div>
@@ -1300,7 +1296,11 @@ export function TruqpediaShell({
                     <MessageBubble
                       key={message.id}
                       message={message}
-                      onCopy={() => void copyMessage(message.content)}
+                      onCopy={
+                        message.role === "assistant"
+                          ? () => void copyMessage(message.content)
+                          : undefined
+                      }
                       onOpenArtifact={
                         message.role === "assistant" && message.content
                           ? () => openArtifactFromMessage(message)
@@ -1321,7 +1321,7 @@ export function TruqpediaShell({
 
           <div className="border-t border-border bg-background/90 px-4 py-3 backdrop-blur-xl sm:px-6">
             <form
-              className="mx-auto flex max-w-4xl items-end gap-2"
+              className="mx-auto flex max-w-5xl items-end gap-2"
               onSubmit={submitMessage}
             >
               <input
@@ -1338,7 +1338,7 @@ export function TruqpediaShell({
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="size-12 shrink-0"
+                    className="size-11 shrink-0"
                     disabled={attachments.length >= 8}
                     onClick={() => fileInputRef.current?.click()}
                   >
@@ -1348,7 +1348,7 @@ export function TruqpediaShell({
                 <TooltipContent>Anexar arquivo</TooltipContent>
               </Tooltip>
 
-              <div className="min-w-0 flex-1 rounded-lg border border-border bg-input-shell p-2 shadow-sm">
+              <div className="min-w-0 flex-1 rounded-md border border-border bg-input-shell p-1 shadow-sm">
                 <Textarea
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
@@ -1358,8 +1358,8 @@ export function TruqpediaShell({
                       void submitMessage();
                     }
                   }}
-                  placeholder="Pergunte por codigo, aplicacao, equivalencia, sintoma ou descricao comercial..."
-                  className="min-h-12 border-0 bg-transparent px-2 py-2 shadow-none focus-visible:ring-0"
+                  placeholder="Pergunte por código, aplicação, equivalência, sintoma ou descrição comercial..."
+                  className="min-h-9 border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0"
                   rows={1}
                 />
                 {attachments.length > 0 ? (
@@ -1387,20 +1387,6 @@ export function TruqpediaShell({
                     ))}
                   </div>
                 ) : null}
-                <div className="flex items-center justify-between gap-2 px-2 pb-1">
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    {webSearch ? (
-                      <span className="inline-flex items-center gap-1">
-                        <Search className="size-3.5" />
-                        Online
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground sm:hidden">
-                    <Sparkles className="size-3.5 text-primary" />
-                    Qualidade máxima
-                  </div>
-                </div>
               </div>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1408,8 +1394,8 @@ export function TruqpediaShell({
                     aria-label={isStreaming ? "Parar geração" : "Enviar mensagem"}
                     type={isStreaming ? "button" : "submit"}
                     size="icon"
-                    className="size-12"
-                    disabled={!input.trim() && !isStreaming}
+                    className="size-11"
+                    disabled={!input.trim() && attachments.length === 0 && !isStreaming}
                     onClick={isStreaming ? stopStreaming : undefined}
                   >
                     {isStreaming ? <X /> : <Send />}
@@ -1426,19 +1412,17 @@ export function TruqpediaShell({
           </div>
         </main>
 
-        <AuthModal
-          open={authOpen}
-          onOpenChange={setAuthOpen}
-          reason={authReason}
-        />
         <ProjectSettingsDialog
-          health={projectHealth}
-          loading={settingsLoading}
+          deletingAllChats={deletingAllChats}
           onOpenChange={setSettingsOpen}
-          onWebSearchChange={setWebSearch}
+          onDeleteAllConversations={() => void deleteAllConversations()}
+          onPreferencesChange={setAssistantPreferences}
+          onSavePreferences={() => void saveAssistantPreferences()}
           open={settingsOpen}
+          preferences={assistantPreferences}
+          preferencesSaving={preferencesSaving}
+          status={settingsStatus}
           user={user}
-          webSearch={webSearch}
         />
         <ProjectCreateDialog
           description={projectDescription}
@@ -1782,24 +1766,34 @@ function ProjectCreateDialog({
 }
 
 function ProjectSettingsDialog({
-  health,
-  loading,
+  deletingAllChats,
+  onDeleteAllConversations,
   onOpenChange,
-  onWebSearchChange,
+  onPreferencesChange,
+  onSavePreferences,
   open,
+  preferences,
+  preferencesSaving,
+  status,
   user,
-  webSearch,
 }: {
-  health: ProjectHealth | null;
-  loading: boolean;
+  deletingAllChats: boolean;
+  onDeleteAllConversations: () => void;
   onOpenChange: (open: boolean) => void;
-  onWebSearchChange: (enabled: boolean) => void;
+  onPreferencesChange: (preferences: AssistantPreferences) => void;
+  onSavePreferences: () => void;
   open: boolean;
+  preferences: AssistantPreferences;
+  preferencesSaving: boolean;
+  status: string | null;
   user: SessionUser | null;
-  webSearch: boolean;
 }) {
-  const checks = health?.checks;
-  const searchProviders = checks?.searchProviders ?? [];
+  function updatePreference<Key extends keyof AssistantPreferences>(
+    key: Key,
+    value: AssistantPreferences[Key],
+  ) {
+    onPreferencesChange({ ...preferences, [key]: value });
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1807,31 +1801,109 @@ function ProjectSettingsDialog({
         <DialogHeader>
           <DialogTitle>Configurações</DialogTitle>
           <DialogDescription>
-            Projeto, resposta e integrações do Truqpedia.
+            Personalize a conversa e gerencie sua conta.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="geral" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="geral">Geral</TabsTrigger>
-            <TabsTrigger value="status">Status</TabsTrigger>
+        <Tabs defaultValue="preferencias" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="preferencias">IA</TabsTrigger>
+            <TabsTrigger value="conta">Conta</TabsTrigger>
+            <TabsTrigger value="plano">Plano</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="geral" className="space-y-4">
-            <div className="rounded-md border border-border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-sm font-medium">Pesquisa online</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {searchProviders.length
-                      ? searchProviders.join(", ")
-                      : "carregando"}
-                  </div>
-                </div>
-                <Switch checked={webSearch} onCheckedChange={onWebSearchChange} />
-              </div>
+          <TabsContent value="preferencias" className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <PreferenceField label="Como te chamar">
+                <Input
+                  value={preferences.displayName ?? ""}
+                  placeholder="Ex.: Ramon"
+                  onChange={(event) =>
+                    updatePreference("displayName", event.target.value)
+                  }
+                />
+              </PreferenceField>
+
+              <PreferenceField label="Como se referir a você">
+                <Input
+                  value={preferences.referenceStyle ?? ""}
+                  placeholder="Ex.: pelo primeiro nome, de forma direta"
+                  onChange={(event) =>
+                    updatePreference("referenceStyle", event.target.value)
+                  }
+                />
+              </PreferenceField>
+
+              <PreferenceField label="Estilo de resposta">
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={preferences.responseStyle ?? ""}
+                  onChange={(event) =>
+                    updatePreference("responseStyle", event.target.value)
+                  }
+                >
+                  <option value="">Equilibrado</option>
+                  <option value="Direto, curto e com próximos passos claros.">
+                    Direto
+                  </option>
+                  <option value="Detalhado, didático e com checklist.">
+                    Detalhado
+                  </option>
+                  <option value="Mais comercial, pronto para WhatsApp e venda.">
+                    Comercial
+                  </option>
+                  <option value="Mais técnico, com cautelas e validações.">
+                    Técnico
+                  </option>
+                </select>
+              </PreferenceField>
+
+              <PreferenceField label="Contexto da sua operação">
+                <Input
+                  value={preferences.businessContext ?? ""}
+                  placeholder="Ex.: loja de peças diesel, balcão e e-commerce"
+                  onChange={(event) =>
+                    updatePreference("businessContext", event.target.value)
+                  }
+                />
+              </PreferenceField>
             </div>
 
+            <PreferenceField label="Como você quer que ele aja">
+              <Textarea
+                value={preferences.behavior ?? ""}
+                placeholder="Ex.: seja direto, faça perguntas quando faltar dado e me entregue mensagem pronta para cliente."
+                className="min-h-24 resize-none bg-input-shell"
+                onChange={(event) =>
+                  updatePreference("behavior", event.target.value)
+                }
+              />
+            </PreferenceField>
+
+            <PreferenceField label="Preferências adicionais">
+              <Textarea
+                value={preferences.customInstructions ?? ""}
+                placeholder="Ex.: priorize linguagem simples para equipe do balcão e destaque riscos de aplicação."
+                className="min-h-20 resize-none bg-input-shell"
+                onChange={(event) =>
+                  updatePreference("customInstructions", event.target.value)
+                }
+              />
+            </PreferenceField>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs leading-5 text-muted-foreground">
+                Essas preferências personalizam a conversa, mas não removem a
+                cautela técnica do Truqpedia.
+              </p>
+              <Button disabled={preferencesSaving} onClick={onSavePreferences}>
+                <Save className="size-4" />
+                {preferencesSaving ? "Salvando..." : "Salvar preferências"}
+              </Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="conta" className="space-y-4">
             <div className="rounded-md border border-border p-4">
               <div className="text-sm font-medium">Conta</div>
               <div className="mt-1 text-xs text-muted-foreground">
@@ -1841,80 +1913,72 @@ function ProjectSettingsDialog({
 
             <div className="rounded-md border border-border p-4">
               <div className="flex items-center gap-2 text-sm font-medium">
-                <Sparkles className="size-4 text-primary" />
-                Qualidade máxima sempre ativa
+                <ShieldCheck className="size-4 text-primary" />
+                Histórico e privacidade operacional
               </div>
               <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                O Truqpedia usa sempre o modelo mais completo configurado para
-                priorizar precisão técnica, comparação e cautela de aplicação.
+                Projetos e conversas ficam vinculados à sua conta para manter
+                clientes, frotas e orçamentos organizados.
               </div>
+            </div>
+
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+              <div className="text-sm font-medium">Apagar histórico de chat</div>
+              <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                Remove todas as conversas e mensagens salvas da sua conta. Seus
+                projetos continuam existindo, mas ficam sem conversas vinculadas.
+              </div>
+              <Button
+                className="mt-4"
+                variant="destructive"
+                disabled={!user || deletingAllChats}
+                onClick={onDeleteAllConversations}
+              >
+                <Trash2 className="size-4" />
+                {deletingAllChats ? "Apagando..." : "Apagar todos os chats"}
+              </Button>
             </div>
           </TabsContent>
 
-          <TabsContent value="status">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <StatusItem
-                icon={<Database className="size-4" />}
-                label="Supabase"
-                ok={Boolean(checks?.supabaseUrl && checks.supabaseAnonKey)}
-                pending={loading}
-              />
-              <StatusItem
-                icon={<Database className="size-4" />}
-                label="Banco"
-                ok={checks?.database === "ok"}
-                pending={loading}
-              />
-              <StatusItem
-                icon={<Bot className="size-4" />}
-                label="IA"
-                ok={Boolean(checks?.aiProvider)}
-                pending={loading}
-              />
-              <StatusItem
-                icon={<Globe2 className="size-4" />}
-                label="Busca"
-                ok={Boolean(checks?.webSearch)}
-                pending={loading}
-              />
+          <TabsContent value="plano" className="space-y-4">
+            <div className="rounded-md border border-border p-4">
+              <div className="text-sm font-medium">Plano atual</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Comece pelo plano Loja para projetos, documentos e histórico
+                completo.
+              </div>
+              <Button className="mt-4" asChild>
+                <Link href="/checkout?plan=loja">
+                  Ver planos e checkout
+                  <ArrowRight />
+                </Link>
+              </Button>
             </div>
           </TabsContent>
         </Tabs>
+
+        {status ? (
+          <div className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
+            {status}
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
   );
 }
 
-function StatusItem({
-  icon,
+function PreferenceField({
+  children,
   label,
-  ok,
-  pending,
 }: {
-  icon: ReactNode;
+  children: React.ReactNode;
   label: string;
-  ok: boolean;
-  pending: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3 text-sm">
-      <div className="flex items-center gap-2">
-        <span className="text-muted-foreground">{icon}</span>
-        <span className="font-medium">{label}</span>
-      </div>
-      <span
-        className={cn(
-          "rounded px-2 py-1 text-xs",
-          pending
-            ? "bg-muted text-muted-foreground"
-            : ok
-              ? "bg-accent text-accent-foreground"
-              : "bg-destructive text-destructive-foreground",
-        )}
-      >
-        {pending ? "..." : ok ? "ok" : "erro"}
-      </span>
-    </div>
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      {children}
+    </label>
   );
 }
 
@@ -1925,7 +1989,7 @@ function MessageBubble({
   onRegenerate,
 }: {
   message: UiMessage;
-  onCopy: () => void;
+  onCopy?: () => void;
   onOpenArtifact?: () => void;
   onRegenerate?: () => void;
 }) {
@@ -1961,7 +2025,7 @@ function MessageBubble({
             </div>
           )
         ) : message.status === "searching" ? (
-          <SearchingSources />
+          <ActivityTimeline activities={message.activities ?? []} />
         ) : (
           <TypingIndicator />
         )}
@@ -1984,49 +2048,35 @@ function MessageBubble({
           </div>
         ) : null}
 
-        {!isUser && message.provider ? (
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3 text-xs text-muted-foreground">
-            <span className="rounded bg-muted px-2 py-1">
-              {message.provider}
-              {message.model ? ` - ${message.model}` : ""}
-            </span>
-          </div>
-        ) : null}
-
         {!isUser && message.sources?.length ? (
           <SourceCards sources={message.sources} />
         ) : null}
 
-        {!isUser && message.content && message.status !== "error" ? (
-          <TechnicalConfidence message={message} />
-        ) : null}
-
-        {message.content ? (
+        {!isUser && message.content ? (
           <div
-            className={cn(
-              "mt-3 flex flex-wrap gap-1 border-t pt-3",
-              isUser ? "border-white/15" : "border-border",
-            )}
+            className="mt-3 flex flex-wrap gap-1 border-t border-border pt-2"
           >
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={onCopy}
-            >
-              <Copy className="size-3.5" />
-              Copiar
-            </Button>
+            {onCopy ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 px-1.5 text-[11px]"
+                onClick={onCopy}
+              >
+                <Copy className="size-3" />
+                Copiar
+              </Button>
+            ) : null}
             {onOpenArtifact ? (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-xs"
+                className="h-6 px-1.5 text-[11px]"
                 onClick={onOpenArtifact}
               >
-                <FileText className="size-3.5" />
+                <FileText className="size-3" />
                 Documento
               </Button>
             ) : null}
@@ -2035,10 +2085,10 @@ function MessageBubble({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-xs"
+                className="h-6 px-1.5 text-[11px]"
                 onClick={onRegenerate}
               >
-                <RotateCcw className="size-3.5" />
+                <RotateCcw className="size-3" />
                 Refazer
               </Button>
             ) : null}
@@ -2054,81 +2104,76 @@ function MessageBubble({
   );
 }
 
-function SearchingSources() {
+function ActivityTimeline({
+  activities,
+}: {
+  activities: Array<{ label: string; detail?: string }>;
+}) {
+  if (activities.length === 0) {
+    return <TypingIndicator />;
+  }
+
   return (
-    <div className="flex items-center gap-3 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
-      <Search className="size-4 animate-pulse text-primary" />
-      <div>
-        <div className="font-medium text-foreground">Buscando fontes</div>
-        <div className="text-xs">Consultando a web antes de responder.</div>
-      </div>
+    <div className="space-y-2 rounded-md border border-border bg-muted/70 p-3 text-sm">
+      {activities.slice(-4).map((activity, index) => {
+        const active = index === activities.slice(-4).length - 1;
+
+        return (
+          <div key={`${activity.label}-${index}`} className="flex gap-2">
+            <span
+              className={cn(
+                "mt-1 grid size-4 shrink-0 place-items-center rounded-full border border-border bg-background",
+                active && "border-primary",
+              )}
+            >
+              <span
+                className={cn(
+                  "size-1.5 rounded-full bg-muted-foreground",
+                  active && "animate-pulse bg-primary",
+                )}
+              />
+            </span>
+            <span className="min-w-0">
+              <span className="block font-medium text-foreground">
+                {activity.label}
+              </span>
+              {activity.detail ? (
+                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                  {activity.detail}
+                </span>
+              ) : null}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 function SourceCards({ sources }: { sources: SourceResult[] }) {
   return (
-    <div className="mt-4 border-t border-border pt-3">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
-        <ExternalLink className="size-3.5" />
-        Fontes consultadas
-      </div>
-      <div className="grid gap-2">
+    <details className="mt-3 border-t border-border pt-2 text-xs text-muted-foreground">
+      <summary className="cursor-pointer select-none list-none">
+        <span className="inline-flex items-center gap-1.5 rounded bg-muted px-2 py-1">
+          <ExternalLink className="size-3" />
+          Fontes ({Math.min(sources.length, 4)})
+        </span>
+      </summary>
+      <div className="mt-2 flex flex-wrap gap-1.5">
         {sources.slice(0, 4).map((source, index) => (
           <a
             key={`${source.url}-${index}`}
             href={source.url}
             target="_blank"
             rel="noreferrer"
-            className="hover-lift block rounded-md border border-border bg-muted/60 p-3 text-xs text-muted-foreground"
+            className="max-w-full truncate rounded border border-border bg-muted/50 px-2 py-1 hover:bg-muted hover:text-foreground"
+            title={source.title || source.url}
           >
-            <span className="flex items-start gap-2">
-              <span className="grid size-6 shrink-0 place-items-center rounded bg-background font-semibold text-foreground">
-                {index + 1}
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate font-medium text-foreground">
-                  {source.title}
-                </span>
-                <span className="mt-1 line-clamp-2 block leading-5">
-                  {source.snippet || source.url}
-                </span>
-                <span className="mt-2 inline-flex items-center gap-1 text-foreground">
-                  {source.provider ?? "web"}
-                  <ExternalLink className="size-3" />
-                </span>
-              </span>
-            </span>
+            [{index + 1}] {source.title || source.url}
           </a>
         ))}
       </div>
-    </div>
-  );
-}
-
-function TechnicalConfidence({ message }: { message: UiMessage }) {
-  const hasSources = Boolean(message.sources?.length);
-  const uncertain = /não tenho|não encontrei|pode variar|confirme|verificar/i.test(
-    message.content,
-  );
-  const level = hasSources && !uncertain ? "Alta" : hasSources ? "Média" : "Triagem";
-
-  return (
-    <div className="mt-3 rounded-md border border-border bg-muted/50 p-3 text-xs leading-5 text-muted-foreground">
-      <div className="flex items-center gap-2 font-medium text-foreground">
-        {hasSources ? (
-          <CheckCircle2 className="size-4 text-primary" />
-        ) : (
-          <ShieldCheck className="size-4 text-primary" />
-        )}
-        Confiança técnica: {level}
-      </div>
-      <div className="mt-1">
-        {hasSources
-          ? "Resposta apoiada por fontes consultadas; ainda confirme aplicação crítica por chassi, catálogo ou fabricante."
-          : "Sem pesquisa online nesta resposta; use como triagem e confirme dados críticos antes de vender ou comprar."}
-      </div>
-    </div>
+    </details>
   );
 }
 
@@ -2221,6 +2266,16 @@ function artifactVersionNumber(title: string, artifacts: UiArtifact[]) {
   return (
     artifacts.filter((artifact) => artifact.title.startsWith(baseTitle)).length + 1
   );
+}
+
+function cleanAssistantPreferences(
+  preferences: AssistantPreferences,
+): AssistantPreferences {
+  return Object.fromEntries(
+    Object.entries(preferences)
+      .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])
+      .filter(([, value]) => Boolean(value)),
+  ) as AssistantPreferences;
 }
 
 function readGuestCount() {

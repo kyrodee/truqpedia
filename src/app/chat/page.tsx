@@ -2,7 +2,13 @@ import { redirect } from "next/navigation";
 import { TruqpediaShell } from "@/components/chat/truqpedia-shell";
 import { isProjectCollection, toProjectSummary } from "@/lib/projects";
 import { getCurrentUser } from "@/lib/supabase/server";
-import type { ChatMode, SourceResult } from "@/lib/types";
+import type {
+  AssistantPreferences,
+  ChatMode,
+  SourceResult,
+  UploadedAttachment,
+} from "@/lib/types";
+import type { Json } from "@/lib/supabase/database.types";
 
 type PageProps = {
   searchParams?: Promise<{ c?: string; p?: string }>;
@@ -17,11 +23,15 @@ export default async function ChatPage({ searchParams }: PageProps) {
   const selectedProjectId = params?.p ?? null;
 
   if (!supabase || !user) {
-    redirect("/");
+    redirect("/login?next=/chat");
   }
 
-  const [{ data: profile }, { data: conversations }, { data: collections }] =
-    await Promise.all([
+  const [
+    { data: profile },
+    { data: conversations },
+    { data: collections },
+    { data: userSettings },
+  ] = await Promise.all([
       supabase
         .from("user_profiles")
         .select("role")
@@ -38,6 +48,11 @@ export default async function ChatPage({ searchParams }: PageProps) {
         .select("*")
         .eq("owner_user_id", user.id)
         .order("updated_at", { ascending: false }),
+      supabase
+        .from("user_settings")
+        .select("metadata")
+        .eq("user_id", user.id)
+        .maybeSingle(),
     ]);
 
   const projects =
@@ -59,7 +74,7 @@ export default async function ChatPage({ searchParams }: PageProps) {
   const { data: messages } = activeConversationId
     ? await supabase
         .from("messages")
-        .select("id,role,content,provider_id,model,metadata,created_at")
+        .select("id,role,content,metadata,created_at")
         .eq("conversation_id", activeConversationId)
         .eq("user_id", user.id)
         .order("created_at", { ascending: true })
@@ -85,7 +100,7 @@ export default async function ChatPage({ searchParams }: PageProps) {
       initialMessages={
         messages?.map((message) => {
           const metadata = message.metadata as
-            | { sources?: SourceResult[] }
+            | { sources?: SourceResult[]; attachments?: UploadedAttachment[] }
             | null
             | undefined;
 
@@ -93,9 +108,8 @@ export default async function ChatPage({ searchParams }: PageProps) {
             id: message.id,
             role: message.role,
             content: message.content,
-            provider: message.provider_id ?? undefined,
-            model: message.model ?? undefined,
             sources: metadata?.sources,
+            attachments: metadata?.attachments,
             createdAt: message.created_at,
             status: "done" as const,
           };
@@ -103,6 +117,38 @@ export default async function ChatPage({ searchParams }: PageProps) {
       }
       initialConversationId={activeConversationId}
       initialProjectId={activeProjectId}
+      initialAssistantPreferences={readAssistantPreferences(
+        userSettings?.metadata,
+      )}
     />
   );
+}
+
+function readAssistantPreferences(metadata: Json | undefined): AssistantPreferences {
+  if (!isJsonObject(metadata)) {
+    return {};
+  }
+
+  const preferences = metadata.assistant_preferences;
+
+  if (!isJsonObject(preferences)) {
+    return {};
+  }
+
+  return {
+    displayName: readString(preferences.displayName),
+    referenceStyle: readString(preferences.referenceStyle),
+    behavior: readString(preferences.behavior),
+    responseStyle: readString(preferences.responseStyle),
+    businessContext: readString(preferences.businessContext),
+    customInstructions: readString(preferences.customInstructions),
+  };
+}
+
+function readString(value: Json | undefined) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function isJsonObject(value: Json | undefined): value is Record<string, Json | undefined> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

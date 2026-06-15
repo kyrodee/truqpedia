@@ -1,8 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { KeyRound, LogIn, Mail, UserPlus } from "lucide-react";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { type FormEvent, useMemo, useState } from "react";
+import { Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,28 +12,20 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
-type AuthModalProps = {
+type ForgotPasswordModalProps = {
+  email?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  reason?: "limit" | "auth";
-  initialView?: AuthView;
 };
 
-type AuthView = "login" | "signup" | "reset";
-
-export function AuthModal({
-  initialView = "login",
+export function ForgotPasswordModal({
+  email = "",
   open,
   onOpenChange,
-  reason,
-}: AuthModalProps) {
-  const [tab, setTab] = useState<AuthView>(initialView);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [companyName, setCompanyName] = useState("");
+}: ForgotPasswordModalProps) {
+  const [resetEmail, setResetEmail] = useState(email);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -46,78 +37,17 @@ export function AuthModal({
     }
   }, []);
 
-  useEffect(() => {
-    if (open) {
-      setTab(initialView);
-    }
-  }, [initialView, open]);
-
-  async function signIn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStatus(null);
-
-    if (!supabase) {
-      setStatus("Configure o Supabase para habilitar autenticação.");
-      return;
-    }
-
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    setLoading(false);
-
-    if (error) {
-      setStatus(error.message);
-      return;
-    }
-
-    window.location.href = "/chat";
-  }
-
-  async function signUp(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStatus(null);
-
-    if (!supabase) {
-      setStatus("Configure o Supabase para habilitar cadastro.");
-      return;
-    }
-
-    setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/chat`,
-        data: {
-          full_name: fullName,
-          company_name: companyName,
-        },
-      },
-    });
-    setLoading(false);
-
-    if (error) {
-      setStatus(error.message);
-      return;
-    }
-
-    setStatus("Cadastro criado. Confirme seu e-mail para continuar.");
-  }
-
   async function resetPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus(null);
 
     if (!supabase) {
-      setStatus("Configure o Supabase para habilitar recuperação.");
+      setStatus("Recuperação indisponível no momento.");
       return;
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
       redirectTo: `${window.location.origin}/auth/callback?next=/chat`,
     });
     setLoading(false);
@@ -134,110 +64,28 @@ export function AuthModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>
-            {reason === "limit" ? "Continue com sua conta" : "Acesse o Truqpedia"}
-          </DialogTitle>
+          <DialogTitle>Recuperar senha</DialogTitle>
           <DialogDescription>
-            {reason === "limit"
-              ? "Seu teste gratuito terminou. Entre ou crie uma conta para manter o histórico e continuar usando."
-              : "Entre para recuperar conversas, sincronizar histórico e usar o Truqpedia no dia a dia."}
+            Informe seu e-mail para receber um link seguro de recuperação.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs
-          value={tab}
-          onValueChange={(value) => setTab(value as AuthView)}
-          className="w-full"
-        >
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="login">
-              <LogIn className="mr-2 size-4" />
-              Entrar
-            </TabsTrigger>
-            <TabsTrigger value="signup">
-              <UserPlus className="mr-2 size-4" />
-              Criar
-            </TabsTrigger>
-            <TabsTrigger value="reset">
-              <KeyRound className="mr-2 size-4" />
-              Senha
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="login">
-            <form className="space-y-4" onSubmit={signIn}>
-              <Field
-                id="login-email"
-                label="E-mail"
-                type="email"
-                value={email}
-                onChange={setEmail}
-              />
-              <Field
-                id="login-password"
-                label="Senha"
-                type="password"
-                value={password}
-                onChange={setPassword}
-              />
-              <Button className="w-full" disabled={loading}>
-                <LogIn />
-                Entrar
-              </Button>
-            </form>
-          </TabsContent>
-
-          <TabsContent value="signup">
-            <form className="space-y-4" onSubmit={signUp}>
-              <Field
-                id="signup-name"
-                label="Nome"
-                value={fullName}
-                onChange={setFullName}
-              />
-              <Field
-                id="signup-company"
-                label="Empresa"
-                value={companyName}
-                onChange={setCompanyName}
-              />
-              <Field
-                id="signup-email"
-                label="E-mail"
-                type="email"
-                value={email}
-                onChange={setEmail}
-              />
-              <Field
-                id="signup-password"
-                label="Senha"
-                type="password"
-                value={password}
-                onChange={setPassword}
-              />
-              <Button className="w-full" disabled={loading}>
-                <UserPlus />
-                Criar conta
-              </Button>
-            </form>
-          </TabsContent>
-
-          <TabsContent value="reset">
-            <form className="space-y-4" onSubmit={resetPassword}>
-              <Field
-                id="reset-email"
-                label="E-mail"
-                type="email"
-                value={email}
-                onChange={setEmail}
-              />
-              <Button className="w-full" disabled={loading}>
-                <Mail />
-                Enviar link
-              </Button>
-            </form>
-          </TabsContent>
-        </Tabs>
+        <form className="space-y-4" onSubmit={resetPassword}>
+          <div className="space-y-2">
+            <Label htmlFor="reset-email">E-mail</Label>
+            <Input
+              id="reset-email"
+              type="email"
+              value={resetEmail}
+              onChange={(event) => setResetEmail(event.target.value)}
+              required
+            />
+          </div>
+          <Button className="w-full" disabled={loading}>
+            <Mail />
+            {loading ? "Enviando..." : "Enviar link"}
+          </Button>
+        </form>
 
         {status ? (
           <div className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
@@ -246,29 +94,6 @@ export function AuthModal({
         ) : null}
       </DialogContent>
     </Dialog>
-  );
-}
-
-type FieldProps = {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-};
-
-function Field({ id, label, value, onChange, type = "text" }: FieldProps) {
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        required
-      />
-    </div>
   );
 }
 
