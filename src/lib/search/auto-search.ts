@@ -25,6 +25,18 @@ export function decideWebSearch(input: {
 }): SearchDecision {
   const message = input.message.trim();
 
+  if (input.intent?.id === "casual_conversation") {
+    return {
+      enabled: false,
+      reason: "Conversa casual; sem necessidade de pesquisa externa.",
+      query: message,
+      activities: [
+        "Lendo o tom da conversa",
+        "Respondendo de forma breve",
+      ],
+    };
+  }
+
   if (input.requested === true) {
     return buildDecision(true, message, "Pesquisa solicitada pelo usuario.", input.intent);
   }

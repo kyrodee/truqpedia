@@ -334,11 +334,18 @@ export async function POST(request: NextRequest) {
               : "Não encontrei fontes confiáveis nesta busca",
           });
         } else {
-          send({
-            type: "activity",
-            label: "Respondendo com base no contexto da conversa",
-            detail: searchDecision.reason,
-          });
+          const responseActivityLabel =
+            intent.id === "casual_conversation"
+              ? "Respondendo de forma breve"
+              : "Respondendo com base no contexto da conversa";
+
+          if (!initialActivities.slice(0, 4).includes(responseActivityLabel)) {
+            send({
+              type: "activity",
+              label: responseActivityLabel,
+              detail: searchDecision.reason,
+            });
+          }
         }
 
         if (sources.length > 0) {
@@ -380,7 +387,13 @@ export async function POST(request: NextRequest) {
           intent: intent.id,
         });
 
-        send({ type: "activity", label: "Gerando resposta tecnica" });
+        send({
+          type: "activity",
+          label:
+            intent.id === "casual_conversation"
+              ? "Gerando resposta"
+              : "Gerando resposta tecnica",
+        });
 
         for await (const event of streamWithFallback({
           mode: body.mode,

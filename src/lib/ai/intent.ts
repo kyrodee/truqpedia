@@ -19,6 +19,14 @@ type IntentProfile = {
 };
 
 const intentProfiles: Record<ChatIntentId, IntentProfile> = {
+  casual_conversation: {
+    label: "conversa casual",
+    responseShape: [
+      "resposta curta e natural",
+      "tom humano",
+      "convite leve para continuar",
+    ],
+  },
   application_check: {
     label: "validacao de aplicacao",
     responseShape: [
@@ -133,7 +141,9 @@ const keywordMap: Record<ChatIntentId, string[]> = {
     "descricao",
     "titulo",
     "copy",
+    "anunci",
     "vender",
+    "venda",
     "palavra chave",
     "palavras chave",
   ],
@@ -154,9 +164,18 @@ const keywordMap: Record<ChatIntentId, string[]> = {
     "problema",
     "falha",
     "barulho",
+    "trepida",
+    "vibra",
     "vibracao",
     "vazamento",
     "fuma",
+    "freia",
+    "freando",
+    "frenagem",
+    "queimado",
+    "aquecendo",
+    "superaque",
+    "descida",
     "luz acesa",
     "codigo de erro",
     "nao pega",
@@ -180,14 +199,22 @@ const keywordMap: Record<ChatIntentId, string[]> = {
     "foto",
     "imagem",
     "etiqueta",
+    "analisa",
+    "analisar",
+    "ler",
     "nota",
     "manual",
   ],
   general_support: [],
+  casual_conversation: [],
 };
 
 const highRiskTerms = [
   "freio",
+  "freios",
+  "freia",
+  "freando",
+  "frenagem",
   "direcao",
   "suspensao",
   "motor",
@@ -209,6 +236,44 @@ export function classifyChatIntent(input: IntentInput): IntentClassification {
   const hasAttachment = attachments.length > 0;
   const hasAttachmentText = attachments.some((attachment) => attachment.text);
   const hasCode = codeLikePattern.test(input.message);
+  const asksCompatibilityDecision = hasAny(normalizedMessage, [
+    "da para anunciar como",
+    "posso anunciar como",
+    "serve",
+    "compativel",
+    "e de qual",
+    "eh de qual",
+    "qual mercedes",
+  ]);
+  const asksReadySaleCopy = hasAny(normalizedMessage, [
+    "faz um anuncio",
+    "cria um anuncio",
+    "gera um anuncio",
+    "escreve um anuncio",
+    "texto de venda",
+    "descricao",
+    "titulo",
+    "palavra chave",
+    "palavras chave",
+    "como eu anunciaria",
+    "como anunciaria",
+  ]);
+  let salesCopyBoost = 1;
+
+  if (asksReadySaleCopy) {
+    salesCopyBoost = hasCode || hasAttachment ? 6 : 3;
+  }
+
+  if (
+    isCasualConversation({
+      message: input.message,
+      normalizedMessage,
+      hasAttachment,
+      hasCode,
+    })
+  ) {
+    return buildClassification("casual_conversation", 0.92);
+  }
 
   for (const [intent, keywords] of Object.entries(keywordMap) as Array<
     [ChatIntentId, string[]]
@@ -223,6 +288,11 @@ export function classifyChatIntent(input: IntentInput): IntentClassification {
   if (hasCode) {
     scores.cross_reference += 3;
     scores.application_check += 1;
+  }
+
+  if (asksCompatibilityDecision) {
+    scores.application_check += 4;
+    scores.cross_reference += hasCode ? 3 : 1;
   }
 
   if (
@@ -240,15 +310,17 @@ export function classifyChatIntent(input: IntentInput): IntentClassification {
   if (
     hasAny(normalizedMessage, [
       "anuncio",
+      "anunci",
       "marketplace",
       "descricao",
       "titulo",
       "vender",
+      "venda",
       "palavra chave",
       "palavras chave",
     ])
   ) {
-    scores.marketplace_copy += hasCode ? 4 : 2;
+    scores.marketplace_copy += salesCopyBoost;
   }
 
   if (vinPattern.test(input.message)) {
@@ -264,7 +336,6 @@ export function classifyChatIntent(input: IntentInput): IntentClassification {
   }
 
   const winner = pickWinner(scores);
-  const profile = intentProfiles[winner.intent];
   const riskLevel = getRiskLevel(normalizedMessage, winner.intent);
   const missingCriticalData = getMissingCriticalData({
     intent: winner.intent,
@@ -276,15 +347,36 @@ export function classifyChatIntent(input: IntentInput): IntentClassification {
     riskLevel,
   });
 
-  return {
-    id: winner.intent,
-    label: profile.label,
-    confidence: winner.confidence,
-    responseShape: profile.responseShape,
+  return buildClassification(winner.intent, winner.confidence, {
     missingCriticalData,
+    riskLevel,
     shouldAskClarifyingQuestion:
       missingCriticalData.length > 0 &&
       (winner.confidence < 0.72 || riskLevel !== "normal"),
+  });
+}
+
+function buildClassification(
+  intent: ChatIntentId,
+  confidence: number,
+  overrides?: Partial<
+    Pick<
+      IntentClassification,
+      "missingCriticalData" | "riskLevel" | "shouldAskClarifyingQuestion"
+    >
+  >,
+): IntentClassification {
+  const profile = intentProfiles[intent];
+  const riskLevel = overrides?.riskLevel ?? "normal";
+
+  return {
+    id: intent,
+    label: profile.label,
+    confidence,
+    responseShape: profile.responseShape,
+    missingCriticalData: overrides?.missingCriticalData ?? [],
+    shouldAskClarifyingQuestion:
+      overrides?.shouldAskClarifyingQuestion ?? false,
     riskLevel,
     searchHint: profile.searchHint,
     activities: [
@@ -292,6 +384,113 @@ export function classifyChatIntent(input: IntentInput): IntentClassification {
       `Preparando resposta para ${profile.label}`,
     ],
   };
+}
+
+function isCasualConversation(input: {
+  message: string;
+  normalizedMessage: string;
+  hasAttachment: boolean;
+  hasCode: boolean;
+}) {
+  if (input.hasAttachment || input.hasCode) {
+    return false;
+  }
+
+  const normalized = input.normalizedMessage
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = normalized ? normalized.split(" ") : [];
+
+  if (words.length > 8) {
+    return false;
+  }
+
+  const exactCasualMessages = new Set([
+    "oi",
+    "ola",
+    "opa",
+    "e ai",
+    "salve",
+    "fala",
+    "bom dia",
+    "boa tarde",
+    "boa noite",
+    "hello",
+    "hey",
+    "valeu",
+    "obrigado",
+    "obrigada",
+    "brigado",
+    "brigada",
+    "show",
+    "fechou",
+    "perfeito",
+    "top",
+    "beleza",
+    "blz",
+    "suave",
+  ]);
+
+  if (exactCasualMessages.has(normalized)) {
+    return true;
+  }
+
+  const startsWithGreeting = [
+    "oi",
+    "ola",
+    "opa",
+    "e ai",
+    "salve",
+    "fala",
+    "bom dia",
+    "boa tarde",
+    "boa noite",
+  ].some((phrase) => normalized.startsWith(phrase));
+  const hasSocialFollowUp = [
+    "tudo bem",
+    "td bem",
+    "tudo certo",
+    "como vai",
+    "como voce ta",
+    "como voce esta",
+    "ta por ai",
+    "voce ta ai",
+  ].some((phrase) => normalized.includes(phrase));
+
+  if (startsWithGreeting && (words.length <= 4 || hasSocialFollowUp)) {
+    return true;
+  }
+
+  const startsWithThanks = [
+    "valeu",
+    "obrigado",
+    "obrigada",
+    "brigado",
+    "brigada",
+    "show",
+    "fechou",
+    "perfeito",
+  ].some((phrase) => normalized.startsWith(phrase));
+  const hasClosingTone = [
+    "era isso",
+    "so isso",
+    "por enquanto",
+    "ate mais",
+    "falou",
+  ].some((phrase) => normalized.includes(phrase));
+
+  if (startsWithThanks && (words.length <= 6 || hasClosingTone)) {
+    return true;
+  }
+
+  return [
+    "quem e voce",
+    "quem eh voce",
+    "o que voce faz",
+    "voce ta ai",
+    "ta online",
+  ].some((phrase) => normalized === phrase || normalized.startsWith(`${phrase} `));
 }
 
 function buildInitialScores() {

@@ -38,6 +38,7 @@ export type AssistantPreferences = {
 };
 
 export type ChatIntentId =
+  | "casual_conversation"
   | "application_check"
   | "cross_reference"
   | "marketplace_copy"

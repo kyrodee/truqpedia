@@ -148,7 +148,10 @@ export function buildProviderMessages(input: {
       })),
     {
       role: "user",
-      content: appendAttachmentContext(input.userMessage, input.attachments ?? []),
+      content: appendTaskContext(
+        appendAttachmentContext(input.userMessage, input.attachments ?? []),
+        input.intent,
+      ),
     },
   ];
 
@@ -166,12 +169,67 @@ function buildIntentContext(intent: IntentClassification | undefined) {
   const clarifyInstruction = intent.shouldAskClarifyingQuestion
     ? "\nSe a resposta depender desses dados, responda o que for possivel agora e termine com poucas perguntas objetivas para destravar a decisao."
     : "";
+  const guardrails = buildIntentGuardrails(intent);
 
   return `\n\nClassificacao operacional da pergunta:
 - Intencao: ${intent.label} (${intent.id}), confianca ${Math.round(intent.confidence * 100)}%.
 - Risco: ${intent.riskLevel}.
 - Estrutura preferida: ${intent.responseShape.join(" -> ")}.${missingData}${clarifyInstruction}
+${guardrails}
 Use essa classificacao para priorizar o formato da resposta, mas ajuste se a conversa mostrar que a intencao real e outra.`;
+}
+
+function buildIntentGuardrails(intent: IntentClassification) {
+  if (intent.id === "casual_conversation") {
+    return `\nRegra especifica para conversa casual:
+- Responda como uma pessoa atenciosa e presente, em 1 a 3 linhas.
+- Nao use cabecalhos, listas, tabela, formato tecnico ou "Resposta curta e direta".
+- Pode ter personalidade leve, mas sem emoji e sem exagero.
+- Se for apenas um cumprimento, cumprimente de volta e convide o usuario a mandar o que precisa.
+- Se for apenas agradecimento ou encerramento ("valeu", "obrigado", "show", "fechou"), reconheca de forma natural e curta. Nao pergunte "como posso ajudar" nesses casos.`;
+  }
+
+  if (intent.id === "marketplace_copy") {
+    return `\nRegras especificas para texto de venda:
+- Use somente fatos informados pelo usuario, anexos ou fontes. Nao invente origem da peca, retirada de veiculo, fotos, garantia, nota fiscal, entrega, prazo, estoque, teste feito, condicao visual ou compatibilidade confirmada.
+- Se algo foi informado mas nao comprovado, escreva de forma prudente: "codigo informado", "original informado" ou "aplicacao anotada/possivel".
+- Troque promessas por cautela objetiva: "compatibilidade a confirmar pelo codigo, catalogo ou chassi/VIN".
+- Entregue o anuncio compacto e pronto para colar. Evite observacoes longas depois do texto pronto.`;
+  }
+
+  if (intent.id === "diagnosis" && intent.riskLevel === "high_risk") {
+    return `\nRegra especifica para diagnostico de alto risco: deixe claro quando nao e seguro seguir rodando, especialmente em freio, direcao, suspensao, pneu, eixo ou motor.`;
+  }
+
+  return "";
+}
+
+function appendTaskContext(
+  userMessage: string,
+  intent: IntentClassification | undefined,
+) {
+  if (intent?.id === "casual_conversation") {
+    return `${userMessage}
+
+Restricao obrigatoria para esta resposta casual:
+- Responda em no maximo 3 linhas.
+- Nao use formato tecnico, lista, tabela, markdown pesado ou secoes.
+- Se for cumprimento, cumprimente de volta e se coloque disponivel.
+- Se for agradecimento/encerramento como "valeu", "obrigado", "show" ou "fechou", responda naturalmente em 1 frase e nao pergunte "como posso ajudar".
+- So puxe o assunto tecnico se o usuario pedir; por enquanto converse normal.`;
+  }
+
+  if (intent?.id !== "marketplace_copy") {
+    return userMessage;
+  }
+
+  return `${userMessage}
+
+Restricao obrigatoria para esta resposta de venda:
+- Entregue somente o texto pronto em formato compacto: Titulo, Descricao, Aplicacao/compatibilidade, Confirmar antes da compra e Palavras-chave.
+- O anuncio sera considerado errado se afirmar qualquer dado nao informado pelo usuario, anexo ou fonte.
+- Nao use estas ideias/frases a menos que estejam explicitamente no pedido ou anexo: "boas condicoes", "sem danos visiveis", "retirado de veiculo", "testado", "garantia", "nota fiscal", "entrega", "ver fotos", "pronta entrega", "compativel confirmado".
+- Para estado visual, garantia, origem, entrega e compatibilidade, use "a confirmar" quando faltar dado.`;
 }
 
 function buildPreferenceContext(preferences: AssistantPreferences | undefined) {
