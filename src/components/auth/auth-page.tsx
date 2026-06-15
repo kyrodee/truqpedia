@@ -100,7 +100,7 @@ export function AuthPage({ mode, nextPath = "/chat" }: AuthPageProps) {
 
   return (
     <main className="min-h-dvh bg-app text-foreground">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+      <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-3 px-3 py-2 sm:px-6">
         <Link
           href="/"
           className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
@@ -117,11 +117,11 @@ export function AuthPage({ mode, nextPath = "/chat" }: AuthPageProps) {
         </Link>
       </div>
 
-      <div className="mx-auto grid min-h-[calc(100dvh-4rem)] max-w-6xl gap-8 px-4 pb-8 sm:px-6 lg:grid-cols-[1fr_450px] lg:items-stretch">
+      <div className="mx-auto grid min-h-[calc(100dvh-4rem)] max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,450px)] lg:items-stretch lg:py-0">
         <AuthShowcase isSignup={isSignup} />
 
-        <section className="flex items-stretch justify-center">
-          <div className="flex w-full max-w-md flex-col justify-center rounded-md border border-border bg-background p-5 shadow-sm sm:p-6 lg:min-h-[680px]">
+        <section className="flex min-w-0 items-stretch justify-center">
+          <div className="flex w-full max-w-md flex-col justify-center rounded-md border border-border bg-background p-4 shadow-sm sm:p-6 lg:min-h-[680px]">
             <div className="grid grid-cols-2 rounded-md bg-muted p-1 text-sm">
               <Link
                 href={loginHref}
@@ -303,13 +303,13 @@ function Field({
 
 function AuthShowcase({ isSignup }: { isSignup: boolean }) {
   return (
-    <section className="hidden lg:flex">
+    <section className="hidden min-w-0 lg:flex">
       <div className="flex min-h-[680px] w-full max-w-2xl flex-col items-start justify-center">
         <div className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm">
           <Sparkles className="size-4 text-primary" />
           {isSignup ? "Comece com o workspace completo" : "Bem-vindo de volta"}
         </div>
-        <h2 className="mt-5 text-5xl font-semibold tracking-normal">
+        <h2 className="mt-5 text-4xl font-semibold tracking-normal xl:text-5xl">
           {isSignup
             ? "Um cockpit técnico para vender melhor em autopeças."
             : "Suas conversas técnicas continuam organizadas."}

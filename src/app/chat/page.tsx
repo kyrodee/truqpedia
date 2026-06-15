@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { TruqpediaShell } from "@/components/chat/truqpedia-shell";
+import { isConversationMemoryMetadata } from "@/lib/ai/memory";
 import { isProjectCollection, toProjectSummary } from "@/lib/projects";
 import { getCurrentUser } from "@/lib/supabase/server";
 import type {
@@ -98,22 +99,28 @@ export default async function ChatPage({ searchParams }: PageProps) {
       }
       initialProjects={projects}
       initialMessages={
-        messages?.map((message) => {
-          const metadata = message.metadata as
-            | { sources?: SourceResult[]; attachments?: UploadedAttachment[] }
-            | null
-            | undefined;
+        messages
+          ?.filter(
+            (message) =>
+              message.role !== "system" &&
+              !isConversationMemoryMetadata(message.metadata),
+          )
+          .map((message) => {
+            const metadata = message.metadata as
+              | { sources?: SourceResult[]; attachments?: UploadedAttachment[] }
+              | null
+              | undefined;
 
-          return {
-            id: message.id,
-            role: message.role,
-            content: message.content,
-            sources: metadata?.sources,
-            attachments: metadata?.attachments,
-            createdAt: message.created_at,
-            status: "done" as const,
-          };
-        }) ?? []
+            return {
+              id: message.id,
+              role: message.role,
+              content: message.content,
+              sources: metadata?.sources,
+              attachments: metadata?.attachments,
+              createdAt: message.created_at,
+              status: "done" as const,
+            };
+          }) ?? []
       }
       initialConversationId={activeConversationId}
       initialProjectId={activeProjectId}

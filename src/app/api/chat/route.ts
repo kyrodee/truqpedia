@@ -3,6 +3,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { DEFAULT_CHAT_MODE, FREE_MESSAGE_LIMIT } from "@/lib/constants";
 import { buildProviderMessages, streamWithFallback } from "@/lib/ai/model-router";
+import { classifyChatIntent } from "@/lib/ai/intent";
+import {
+  buildConversationMemory,
+  persistConversationMemory,
+  readConversationMemory,
+} from "@/lib/ai/memory";
 import { logError, logInfo } from "@/lib/logger";
 import { searchWeb } from "@/lib/search/web-search";
 import { decideWebSearch } from "@/lib/search/auto-search";
@@ -19,7 +25,12 @@ import { getClientIp, checkRateLimit, rateLimitHeaders } from "@/lib/rate-limit"
 import { readJsonBody } from "@/lib/request";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Json } from "@/lib/supabase/database.types";
-import type { ChatMessage, SourceResult, StreamEvent } from "@/lib/types";
+import type {
+  ChatMessage,
+  IntentClassification,
+  SourceResult,
+  StreamEvent,
+} from "@/lib/types";
 import { recordUsageLog } from "@/lib/usage/metrics";
 import { toSse, truncate } from "@/lib/utils";
 
@@ -85,6 +96,11 @@ export async function POST(request: NextRequest) {
   }
 
   const body = { ...parsed.data, mode: DEFAULT_CHAT_MODE };
+  const intent = classifyChatIntent({
+    message: body.message,
+    attachments: body.attachments,
+    preferences: body.preferences,
+  });
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -140,6 +156,9 @@ export async function POST(request: NextRequest) {
   let persistedUserMessage = false;
   let history: ChatMessage[] = body.clientMessages.slice(-20);
   let project: { id: string; metadata: Json } | null = null;
+  let conversationMemory: Awaited<
+    ReturnType<typeof readConversationMemory>
+  > = null;
 
   if (user && supabase) {
     if (body.projectId) {
@@ -228,12 +247,20 @@ export async function POST(request: NextRequest) {
       .order("created_at", { ascending: true })
       .limit(30);
 
+    conversationMemory = await readConversationMemory({
+      supabase,
+      conversationId: ownedConversationId,
+      userId: user.id,
+    });
+
     history =
-      previousMessages?.map((message) => ({
-        role: message.role,
-        content: message.content,
-        createdAt: message.created_at,
-      })) ?? [];
+      previousMessages
+        ?.filter((message) => message.role !== "system")
+        .map((message) => ({
+          role: message.role,
+          content: message.content,
+          createdAt: message.created_at,
+        })) ?? [];
 
     const { error: messageError } = await supabase.from("messages").insert({
       conversation_id: ownedConversationId,
@@ -244,6 +271,7 @@ export async function POST(request: NextRequest) {
         web_search_requested: body.webSearch,
         attachments: summarizeAttachments(body.attachments),
         assistant_preferences: body.preferences,
+        intent: serializeIntent(intent),
       },
     });
 
@@ -267,6 +295,7 @@ export async function POST(request: NextRequest) {
         message: body.message,
         attachments: body.attachments,
         requested: body.webSearch,
+        intent,
       });
 
       const send = (event: StreamEvent) => {
@@ -282,7 +311,12 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        for (const label of searchDecision.activities.slice(0, 2)) {
+        const initialActivities = [
+          ...intent.activities,
+          ...searchDecision.activities,
+        ].filter(uniqueLabels);
+
+        for (const label of initialActivities.slice(0, 4)) {
           send({ type: "activity", label });
         }
 
@@ -317,6 +351,8 @@ export async function POST(request: NextRequest) {
           sources,
           attachments: body.attachments,
           preferences: body.preferences,
+          intent,
+          memory: conversationMemory,
         });
 
         await recordUsageLog({
@@ -331,6 +367,8 @@ export async function POST(request: NextRequest) {
             persistedUserMessage,
             sourceCount: sources.length,
             attachmentCount: body.attachments.length,
+            intent: serializeIntent(intent),
+            memoryPresent: Boolean(conversationMemory),
           },
         });
 
@@ -339,9 +377,10 @@ export async function POST(request: NextRequest) {
           conversationId,
           searchEnabled: searchDecision.enabled,
           sourceCount: sources.length,
+          intent: intent.id,
         });
 
-        send({ type: "activity", label: "Gerando resposta técnica" });
+        send({ type: "activity", label: "Gerando resposta tecnica" });
 
         for await (const event of streamWithFallback({
           mode: body.mode,
@@ -375,10 +414,37 @@ export async function POST(request: NextRequest) {
               model,
               latency_ms: Date.now() - startedAt,
               token_count: Math.ceil(assistantContent.length / 4),
-              metadata: { sources },
+              metadata: {
+                sources,
+                intent: serializeIntent(intent),
+              },
             })
             .select("id")
             .single();
+
+          const nextMemory = buildConversationMemory({
+            previousMemory: conversationMemory,
+            history,
+            userMessage: body.message,
+            assistantContent,
+            intent,
+          });
+          const { error: memoryError } = await persistConversationMemory({
+            supabase,
+            conversationId,
+            userId: user.id,
+            memory: {
+              ...nextMemory,
+              messageId: conversationMemory?.messageId,
+            },
+          });
+
+          if (memoryError) {
+            logError("chat.memory.persist_failed", memoryError, {
+              userId: user.id,
+              conversationId,
+            });
+          }
 
           await supabase
             .from("conversations")
@@ -448,4 +514,19 @@ function summarizeAttachments(
     size: attachment.size,
     truncated: attachment.truncated ?? false,
   }));
+}
+
+function serializeIntent(intent: IntentClassification) {
+  return {
+    id: intent.id,
+    label: intent.label,
+    confidence: intent.confidence,
+    riskLevel: intent.riskLevel,
+    missingCriticalData: intent.missingCriticalData,
+    shouldAskClarifyingQuestion: intent.shouldAskClarifyingQuestion,
+  };
+}
+
+function uniqueLabels(label: string, index: number, labels: string[]) {
+  return labels.indexOf(label) === index;
 }

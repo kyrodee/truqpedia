@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { isConversationMemoryMetadata } from "@/lib/ai/memory";
 import { readJsonBody } from "@/lib/request";
 import { requireUser } from "@/lib/supabase/authz";
 
@@ -57,7 +58,12 @@ export async function GET(_request: Request, context: RouteContext) {
 
   return NextResponse.json({
     conversation,
-    messages: messages ?? [],
+    messages:
+      messages?.filter(
+        (message) =>
+          message.role !== "system" &&
+          !isConversationMemoryMetadata(message.metadata),
+      ) ?? [],
   });
 }
 

@@ -61,7 +61,7 @@ export function CheckoutPage({ plan, userEmail }: CheckoutPageProps) {
 
   return (
     <main className="min-h-dvh bg-app text-foreground">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         <Link
           href="/"
           className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
@@ -70,13 +70,13 @@ export function CheckoutPage({ plan, userEmail }: CheckoutPageProps) {
           Voltar
         </Link>
 
-        <div className="mt-8 grid items-stretch gap-4 lg:grid-cols-[1fr_380px]">
-          <section className="rounded-md border border-border bg-background p-6 shadow-sm">
+        <div className="mt-6 grid items-start gap-4 lg:mt-8 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+          <section className="min-w-0 rounded-md border border-border bg-background p-4 shadow-sm sm:p-6">
             <div className="inline-flex items-center gap-2 rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
               <CreditCard className="size-4 text-primary" />
               Checkout do plano
             </div>
-            <h1 className="mt-5 text-3xl font-semibold tracking-normal">
+            <h1 className="mt-5 text-2xl font-semibold tracking-normal sm:text-3xl">
               Confirmar plano {plan.name}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
@@ -85,7 +85,7 @@ export function CheckoutPage({ plan, userEmail }: CheckoutPageProps) {
               etapa.
             </p>
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {[
                 ["Plano", "Escolha o melhor pacote para sua operação."],
                 ["Conta", "Entre ou crie conta para salvar a assinatura."],
@@ -141,7 +141,7 @@ export function CheckoutPage({ plan, userEmail }: CheckoutPageProps) {
             </div>
           </section>
 
-          <aside className="rounded-md border border-border bg-background p-5 shadow-sm">
+          <aside className="rounded-md border border-border bg-background p-4 shadow-sm sm:p-5 lg:sticky lg:top-6">
             <div className="text-sm font-semibold">{plan.name}</div>
             <div className="mt-3 flex items-end gap-2">
               <div className="text-3xl font-semibold">{plan.price}</div>

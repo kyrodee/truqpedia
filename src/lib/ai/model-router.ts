@@ -9,9 +9,12 @@ import { ProviderError } from "@/lib/ai/streaming";
 import type { ProviderMessage } from "@/lib/ai/types";
 import { recordProviderMetric } from "@/lib/usage/metrics";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { memoryToPrompt } from "@/lib/ai/memory";
 import type {
   ChatMessage,
   ChatMode,
+  ConversationMemory,
+  IntentClassification,
   ProviderId,
   ProviderRuntimeConfig,
   SourceResult,
@@ -115,6 +118,8 @@ export function buildProviderMessages(input: {
   sources: SourceResult[];
   attachments?: UploadedAttachment[];
   preferences?: AssistantPreferences;
+  intent?: IntentClassification;
+  memory?: ConversationMemory | null;
 }) {
   const searchContext =
     input.sources.length > 0
@@ -126,11 +131,13 @@ export function buildProviderMessages(input: {
           .join("\n\n")}\n\nUse marcadores de citacao no corpo da resposta, como [1] ou [2], sempre que uma afirmacao vier dessas fontes. Nao crie uma secao longa de links no final: a interface ja mostra as fontes consultadas de forma discreta. Nao invente fontes nem atribua uma fonte a uma afirmacao que ela nao sustenta.`
       : "";
   const preferenceContext = buildPreferenceContext(input.preferences);
+  const intentContext = buildIntentContext(input.intent);
+  const memoryContext = memoryToPrompt(input.memory);
 
   const messages: ProviderMessage[] = [
     {
       role: "system",
-      content: `${SYSTEM_PROMPT}${preferenceContext}${searchContext}`,
+      content: `${SYSTEM_PROMPT}${preferenceContext}${memoryContext}${intentContext}${searchContext}`,
     },
     ...input.history
       .filter((message) => message.role !== "system")
@@ -146,6 +153,25 @@ export function buildProviderMessages(input: {
   ];
 
   return messages;
+}
+
+function buildIntentContext(intent: IntentClassification | undefined) {
+  if (!intent) {
+    return "";
+  }
+
+  const missingData = intent.missingCriticalData.length
+    ? `\nDados criticos faltantes ou a confirmar: ${intent.missingCriticalData.join("; ")}.`
+    : "";
+  const clarifyInstruction = intent.shouldAskClarifyingQuestion
+    ? "\nSe a resposta depender desses dados, responda o que for possivel agora e termine com poucas perguntas objetivas para destravar a decisao."
+    : "";
+
+  return `\n\nClassificacao operacional da pergunta:
+- Intencao: ${intent.label} (${intent.id}), confianca ${Math.round(intent.confidence * 100)}%.
+- Risco: ${intent.riskLevel}.
+- Estrutura preferida: ${intent.responseShape.join(" -> ")}.${missingData}${clarifyInstruction}
+Use essa classificacao para priorizar o formato da resposta, mas ajuste se a conversa mostrar que a intencao real e outra.`;
 }
 
 function buildPreferenceContext(preferences: AssistantPreferences | undefined) {
@@ -194,14 +220,14 @@ function appendAttachmentContext(
       const header = `Arquivo ${index + 1}: ${attachment.name} (${attachment.type || "tipo desconhecido"}, ${attachment.size} bytes)`;
 
       if (!attachment.text) {
-        return `${header}\nConteudo textual nao extraido automaticamente. Use o nome e o tipo do arquivo como referencia e peca mais contexto se precisar.`;
+        return `${header}\nConteudo textual nao extraido automaticamente. Nao finja ter lido o arquivo. Use apenas nome, tipo e tamanho como pistas e peca uma versao legivel, transcricao, foto melhor ou dados especificos se isso for necessario.`;
       }
 
       return `${header}${attachment.truncated ? "\nConteudo truncado para caber no contexto." : ""}\n\n${attachment.text}`;
     })
     .join("\n\n---\n\n");
 
-  return `${userMessage}\n\nArquivos anexados para analise:\n\n${context}`;
+  return `${userMessage}\n\nArquivos anexados para analise. Quando usar informacao de arquivo, deixe claro que ela veio do anexo. Se uma conclusao vier de conhecimento geral ou fonte externa, diferencie isso do que o arquivo realmente sustenta.\n\n${context}`;
 }
 
 export async function* streamWithFallback(input: {

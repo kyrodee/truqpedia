@@ -37,6 +37,38 @@ export type AssistantPreferences = {
   customInstructions?: string;
 };
 
+export type ChatIntentId =
+  | "application_check"
+  | "cross_reference"
+  | "marketplace_copy"
+  | "purchase_checklist"
+  | "diagnosis"
+  | "technical_explanation"
+  | "document_analysis"
+  | "general_support";
+
+export type IntentRiskLevel = "normal" | "needs_confirmation" | "high_risk";
+
+export type IntentClassification = {
+  id: ChatIntentId;
+  label: string;
+  confidence: number;
+  responseShape: string[];
+  missingCriticalData: string[];
+  shouldAskClarifyingQuestion: boolean;
+  riskLevel: IntentRiskLevel;
+  searchHint?: string;
+  activities: string[];
+};
+
+export type ConversationMemory = {
+  summary: string;
+  openQuestions: string[];
+  entities: string[];
+  lastIntent?: ChatIntentId;
+  updatedAt: string;
+};
+
 export type ConversationSummary = {
   id: string;
   title: string;

@@ -281,7 +281,7 @@ export function TruqpediaLanding({ user }: { user: LandingUser }) {
 function LandingHeader({ user }: { user: LandingUser }) {
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/88 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+      <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-2 px-3 py-2 sm:gap-3 sm:px-6">
         <Link href="/" className="flex min-w-0 items-center gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
             <Wrench className="size-4" />
@@ -338,13 +338,13 @@ function LandingHeader({ user }: { user: LandingUser }) {
 function HeroSection({ user }: { user: LandingUser }) {
   return (
     <section className="relative isolate overflow-hidden border-b border-border bg-app">
-      <div className="mx-auto flex min-h-[calc(78dvh-4rem)] max-w-6xl flex-col justify-center px-4 py-16 sm:px-6 lg:py-20">
+      <div className="mx-auto flex min-h-[calc(100svh-4rem)] max-w-6xl flex-col justify-center px-4 py-10 sm:min-h-[calc(82dvh-4rem)] sm:px-6 sm:py-14 lg:min-h-[calc(78dvh-4rem)] lg:py-20">
         <div className="relative z-10 max-w-4xl soft-enter">
-          <div className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm">
+          <div className="inline-flex max-w-full items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm">
             <Sparkles className="size-4 text-primary" />
             Para quem trabalha com autopeças todos os dias
           </div>
-          <h1 className="mt-5 max-w-4xl text-4xl font-semibold tracking-normal sm:text-6xl">
+          <h1 className="mt-5 max-w-4xl text-3xl font-semibold tracking-normal sm:text-5xl lg:text-6xl">
             Decisão técnica mais clara do balcão ao estoque.
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
@@ -354,7 +354,7 @@ function HeroSection({ user }: { user: LandingUser }) {
           </p>
           <div className="mt-7 flex flex-col gap-2 sm:flex-row">
             {user ? (
-              <Button asChild>
+              <Button className="w-full sm:w-auto" asChild>
                 <Link href="/chat">
                   Abrir workspace
                   <ArrowRight />
@@ -362,13 +362,13 @@ function HeroSection({ user }: { user: LandingUser }) {
               </Button>
             ) : (
               <>
-                <Button asChild>
+                <Button className="w-full sm:w-auto" asChild>
                   <Link href="/cadastro">
                     <UserPlus />
                     Criar conta grátis
                   </Link>
                 </Button>
-                <Button variant="outline" asChild>
+                <Button className="w-full sm:w-auto" variant="outline" asChild>
                   <a href="#demonstracao">
                     Testar sem cadastro
                     <ArrowRight />
@@ -426,7 +426,7 @@ function DemoSection({
 }) {
   return (
     <section id="demonstracao" className="border-b border-border bg-background">
-      <div className="mx-auto grid max-w-6xl items-stretch gap-8 px-4 py-16 sm:px-6 lg:grid-cols-[390px_1fr]">
+      <div className="mx-auto grid max-w-6xl items-stretch gap-6 px-4 py-12 sm:px-6 lg:grid-cols-[minmax(0,390px)_minmax(0,1fr)] lg:gap-8 lg:py-16">
         <div className="flex h-full flex-col">
           <div className="inline-flex items-center gap-2 rounded-md border border-border bg-app px-3 py-1.5 text-xs font-medium text-muted-foreground">
             <Bot className="size-4 text-primary" />
@@ -440,7 +440,7 @@ function DemoSection({
             com você, pesquisa quando faz sentido e mostra o raciocínio enquanto
             trabalha.
           </p>
-          <div className="mt-6 grid flex-1 gap-3 lg:grid-rows-3">
+          <div className="mt-6 grid flex-1 gap-3 sm:grid-cols-3 lg:grid-cols-1 lg:grid-rows-3">
             {demoHighlights.map((item) => (
               <div
                 key={item.title}
@@ -458,7 +458,7 @@ function DemoSection({
           </div>
         </div>
 
-        <div className="flex h-full flex-col rounded-md border border-border bg-app p-3 shadow-sm">
+        <div className="min-w-0 flex h-full flex-col rounded-md border border-border bg-app p-3 shadow-sm">
           <div className="flex items-center justify-between gap-3 border-b border-border px-2 pb-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-sm font-semibold">
@@ -471,7 +471,7 @@ function DemoSection({
             </div>
           </div>
 
-          <div className="min-h-[410px] flex-1 space-y-4 overflow-y-auto px-2 py-4">
+          <div className="min-h-[320px] flex-1 space-y-4 overflow-y-auto px-1 py-4 sm:min-h-[380px] sm:px-2 lg:min-h-[410px]">
             {messages.length === 0 ? (
               <DemoEmptyState onPromptSelect={onPromptSelect} />
             ) : (
@@ -494,7 +494,7 @@ function DemoSection({
             />
             <Button
               type="submit"
-              className="h-20 shrink-0 sm:h-16 sm:w-12"
+              className="h-11 w-full shrink-0 sm:h-16 sm:w-12"
               size="icon"
               disabled={!input.trim() || isStreaming}
               aria-label="Enviar teste"
@@ -638,7 +638,7 @@ function HowItWorksSection() {
             orçamento sem apostar no escuro.
           </p>
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {steps.map((step) => (
             <div
               key={step.title}
@@ -668,7 +668,7 @@ function PlansSection() {
             base técnica própria.
           </p>
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {billingPlans.map((plan) => (
             <div
               key={plan.name}
@@ -759,7 +759,7 @@ function FaqSection() {
 function LandingFooter({ user }: { user: LandingUser }) {
   return (
     <footer className="bg-primary text-primary-foreground">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-[1fr_auto]">
+      <div className="mx-auto grid max-w-6xl gap-6 px-4 py-10 sm:px-6 md:grid-cols-[1fr_auto] md:gap-8">
         <div>
           <div className="flex items-center gap-3">
             <div className="grid size-9 place-items-center rounded-md bg-primary-foreground text-primary">
@@ -780,7 +780,7 @@ function LandingFooter({ user }: { user: LandingUser }) {
         </div>
         {!user ? (
           <div className="flex flex-col gap-2 sm:flex-row md:items-start">
-            <Button variant="secondary" asChild>
+            <Button className="w-full sm:w-auto" variant="secondary" asChild>
               <Link href="/cadastro">
                 <UserPlus />
                 Criar conta
@@ -788,7 +788,7 @@ function LandingFooter({ user }: { user: LandingUser }) {
             </Button>
             <Button
               variant="outline"
-              className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
+              className="w-full border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground sm:w-auto"
               asChild
             >
               <Link href="/login">
@@ -798,7 +798,7 @@ function LandingFooter({ user }: { user: LandingUser }) {
             </Button>
           </div>
         ) : (
-          <Button variant="secondary" asChild>
+          <Button className="w-full sm:w-auto" variant="secondary" asChild>
             <Link href="/chat">
               Abrir chat
               <ArrowRight />

@@ -67,18 +67,34 @@ body {
   height: 100%;
 }
 
+html {
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   background: var(--app);
   color: var(--foreground);
   font-family: "Satoshi", "Satoshi Variable", Arial, Helvetica, sans-serif;
   letter-spacing: 0;
   font-weight: 400;
+  overflow-x: hidden;
 }
 
 button,
 input,
+select,
 textarea {
   font: inherit;
+  min-width: 0;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
 }
 
 ::selection {
@@ -152,6 +168,23 @@ textarea {
 
 .typing-caret {
   animation: typing-caret 0.9s steps(1) infinite;
+}
+
+.mobile-safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+@media (max-width: 640px) {
+  .prose {
+    overflow-wrap: anywhere;
+  }
+
+  .prose table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
 }
 
 .soft-enter {

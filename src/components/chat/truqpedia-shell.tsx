@@ -897,21 +897,21 @@ export function TruqpediaShell({
 
   return (
     <TooltipProvider>
-      <div className="flex h-dvh overflow-hidden bg-app text-foreground">
+      <div className="flex h-dvh min-w-0 overflow-hidden bg-app text-foreground">
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-40 flex w-[310px] flex-col border-r border-sidebar-border bg-sidebar/95 backdrop-blur-xl transition-transform md:static md:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex w-[min(310px,calc(100vw-0.75rem))] flex-col border-r border-sidebar-border bg-sidebar/95 backdrop-blur-xl transition-transform md:static md:w-[300px] md:translate-x-0 lg:w-[310px]",
             sidebarOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
-          <div className="flex h-16 items-center justify-between px-4">
+          <div className="flex min-h-16 items-center justify-between gap-3 px-3 py-2 sm:px-4">
             <div className="flex items-center gap-3">
               <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground shadow-sm">
                 <Wrench className="size-4" />
               </div>
               <div>
                 <div className="text-sm font-semibold">Truqpedia</div>
-                <div className="text-xs text-muted-foreground">
+                <div className="truncate text-xs text-muted-foreground">
                   Inteligencia automotiva
                 </div>
               </div>
@@ -1169,7 +1169,7 @@ export function TruqpediaShell({
         ) : null}
 
         <main className="flex min-w-0 flex-1 flex-col font-sans">
-          <header className="flex h-16 items-center justify-between border-b border-border bg-background/85 px-3 backdrop-blur-xl sm:px-5">
+          <header className="flex min-h-16 items-center justify-between gap-2 border-b border-border bg-background/85 px-2 py-2 backdrop-blur-xl sm:px-5">
             <div className="flex min-w-0 items-center gap-2">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1196,7 +1196,7 @@ export function TruqpediaShell({
               </div>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -1228,10 +1228,10 @@ export function TruqpediaShell({
               ) : null}
 
               {!user ? (
-                <Button variant="outline" asChild>
+                <Button variant="outline" className="px-2 sm:px-4" asChild>
                   <Link href="/login?next=/chat">
                     <LogIn />
-                    Entrar
+                    <span className="hidden sm:inline">Entrar</span>
                   </Link>
                 </Button>
               ) : null}
@@ -1239,15 +1239,15 @@ export function TruqpediaShell({
           </header>
 
           <section className="flex-1 overflow-y-auto">
-            <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-4 py-6 sm:px-6">
+            <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 py-4 sm:px-6 sm:py-6">
               {messages.length === 0 ? (
-                <div className="soft-enter flex flex-1 flex-col justify-center gap-6 py-10">
+                <div className="soft-enter flex flex-1 flex-col justify-center gap-5 py-8 sm:gap-6 sm:py-10">
                   <div className="space-y-3">
                     <div className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground">
                       <Bot className="size-4 text-primary" />
                       {activeProject ? activeProject.name : "Truqpedia pronto"}
                     </div>
-                    <h1 className="max-w-2xl text-3xl font-semibold tracking-normal sm:text-4xl">
+                    <h1 className="max-w-2xl text-2xl font-semibold tracking-normal sm:text-4xl">
                       Escolha um fluxo e chegue numa resposta técnica mais segura.
                     </h1>
                     <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
@@ -1257,7 +1257,7 @@ export function TruqpediaShell({
                     </p>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 md:grid-cols-2">
                     {workflowPrompts.map((item) => (
                       <button
                         key={item.title}
@@ -1275,7 +1275,7 @@ export function TruqpediaShell({
                     ))}
                   </div>
 
-                  <div className="grid gap-3 rounded-md border border-border bg-background p-4 text-sm text-muted-foreground sm:grid-cols-3">
+                  <div className="grid gap-3 rounded-md border border-border bg-background p-3 text-sm text-muted-foreground sm:p-4 lg:grid-cols-3">
                     <div className="flex gap-2">
                       <BadgeCheck className="mt-0.5 size-4 shrink-0 text-primary" />
                       <span>Peça confirmação por chassi quando houver risco de aplicação.</span>
@@ -1319,9 +1319,9 @@ export function TruqpediaShell({
             </div>
           </section>
 
-          <div className="border-t border-border bg-background/90 px-4 py-3 backdrop-blur-xl sm:px-6">
+          <div className="mobile-safe-bottom border-t border-border bg-background/90 px-2 py-2 backdrop-blur-xl sm:px-6 sm:py-3">
             <form
-              className="mx-auto flex max-w-5xl items-end gap-2"
+              className="mx-auto flex max-w-5xl items-end gap-1.5 sm:gap-2"
               onSubmit={submitMessage}
             >
               <input
@@ -1338,7 +1338,7 @@ export function TruqpediaShell({
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="size-11 shrink-0"
+                    className="size-10 shrink-0 sm:size-11"
                     disabled={attachments.length >= 8}
                     onClick={() => fileInputRef.current?.click()}
                   >
@@ -1359,7 +1359,7 @@ export function TruqpediaShell({
                     }
                   }}
                   placeholder="Pergunte por código, aplicação, equivalência, sintoma ou descrição comercial..."
-                  className="min-h-9 border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0"
+                  className="min-h-10 border-0 bg-transparent px-2 py-2 shadow-none focus-visible:ring-0 sm:min-h-9 sm:py-1.5"
                   rows={1}
                 />
                 {attachments.length > 0 ? (
@@ -1394,7 +1394,7 @@ export function TruqpediaShell({
                     aria-label={isStreaming ? "Parar geração" : "Enviar mensagem"}
                     type={isStreaming ? "button" : "submit"}
                     size="icon"
-                    className="size-11"
+                    className="size-10 shrink-0 sm:size-11"
                     disabled={!input.trim() && attachments.length === 0 && !isStreaming}
                     onClick={isStreaming ? stopStreaming : undefined}
                   >
@@ -1493,15 +1493,15 @@ function ArtifactPanel({
     (draftTitle !== artifact?.title || draftContent !== artifact?.content);
 
   return (
-    <div className="soft-enter fixed inset-x-0 bottom-0 z-50 flex h-[86dvh] w-full flex-col rounded-t-2xl border border-border bg-background shadow-2xl md:inset-y-0 md:left-auto md:right-0 md:h-auto md:w-[480px] md:rounded-none md:border-y-0 md:border-l">
-      <div className="flex h-16 items-center justify-between border-b border-border px-4">
+    <div className="soft-enter fixed inset-x-0 bottom-0 z-50 flex h-[92dvh] max-h-[calc(100dvh-0.5rem)] w-full flex-col rounded-t-lg border border-border bg-background shadow-2xl md:inset-y-0 md:left-auto md:right-0 md:h-auto md:w-[min(520px,44vw)] md:rounded-none md:border-y-0 md:border-l lg:w-[560px]">
+      <div className="flex min-h-16 items-center justify-between gap-3 border-b border-border px-3 py-2 sm:px-4">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">Documento</div>
           <div className="truncate text-xs text-muted-foreground">
             Edite, versione e baixe respostas salvas
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           {artifact ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1541,7 +1541,7 @@ function ArtifactPanel({
       {artifact ? (
         <>
           <div className="border-b border-border p-3">
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 flex-1">
                 {mode === "edit" ? (
                   <input
@@ -1559,7 +1559,7 @@ function ArtifactPanel({
                   {new Date(artifact.createdAt).toLocaleString("pt-BR")}
                 </div>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -1593,7 +1593,7 @@ function ArtifactPanel({
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <div className="inline-flex rounded-md border border-border bg-muted p-1">
                 <button
                   type="button"
@@ -1621,6 +1621,7 @@ function ArtifactPanel({
                 </button>
               </div>
               <Button
+                className="w-full sm:w-auto"
                 size="sm"
                 disabled={!dirty || !draftTitle.trim() || !draftContent.trim()}
                 onClick={() => {
@@ -1641,16 +1642,16 @@ function ArtifactPanel({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
             {mode === "edit" ? (
               <Textarea
                 value={draftContent}
                 onChange={(event) => setDraftContent(event.target.value)}
-                className="min-h-full resize-none bg-input-shell text-sm leading-6"
+                className="h-full min-h-[52dvh] resize-none bg-input-shell text-sm leading-6"
                 aria-label="Conteúdo do documento"
               />
             ) : (
-              <div className="rounded-md border border-border bg-app p-4">
+              <div className="rounded-md border border-border bg-app p-3 sm:p-4">
                 <MarkdownMessage content={draftContent || artifact.content} />
               </div>
             )}
@@ -1746,15 +1747,16 @@ function ProjectCreateDialog({
             <span>Catálogo</span>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button
+              className="w-full sm:w-auto"
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
               Cancelar
             </Button>
-            <Button disabled={!name.trim() || saving}>
+            <Button className="w-full sm:w-auto" disabled={!name.trim() || saving}>
               <FolderPlus className="size-4" />
               {saving ? "Criando..." : "Criar projeto"}
             </Button>
@@ -1891,12 +1893,16 @@ function ProjectSettingsDialog({
               />
             </PreferenceField>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs leading-5 text-muted-foreground">
                 Essas preferências personalizam a conversa, mas não removem a
                 cautela técnica do Truqpedia.
               </p>
-              <Button disabled={preferencesSaving} onClick={onSavePreferences}>
+              <Button
+                className="w-full sm:w-auto"
+                disabled={preferencesSaving}
+                onClick={onSavePreferences}
+              >
                 <Save className="size-4" />
                 {preferencesSaving ? "Salvando..." : "Salvar preferências"}
               </Button>
@@ -1929,7 +1935,7 @@ function ProjectSettingsDialog({
                 projetos continuam existindo, mas ficam sem conversas vinculadas.
               </div>
               <Button
-                className="mt-4"
+                className="mt-4 w-full sm:w-auto"
                 variant="destructive"
                 disabled={!user || deletingAllChats}
                 onClick={onDeleteAllConversations}
@@ -1947,7 +1953,7 @@ function ProjectSettingsDialog({
                 Comece pelo plano Loja para projetos, documentos e histórico
                 completo.
               </div>
-              <Button className="mt-4" asChild>
+              <Button className="mt-4 w-full sm:w-auto" asChild>
                 <Link href="/checkout?plan=loja">
                   Ver planos e checkout
                   <ArrowRight />
@@ -1997,16 +2003,19 @@ function MessageBubble({
 
   return (
     <div
-      className={cn("soft-enter flex gap-3 font-sans", isUser && "justify-end")}
+      className={cn(
+        "soft-enter flex gap-2 font-sans sm:gap-3",
+        isUser && "justify-end",
+      )}
     >
       {!isUser ? (
-        <div className="mt-1 grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
+        <div className="mt-1 hidden size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground min-[420px]:grid">
           <Bot className="size-4" />
         </div>
       ) : null}
       <div
         className={cn(
-          "min-w-0 max-w-[calc(100%-2.75rem)] rounded-lg px-4 py-3 text-sm shadow-sm sm:max-w-[86%]",
+          "min-w-0 max-w-full rounded-lg px-3 py-3 text-sm shadow-sm min-[420px]:max-w-[calc(100%-2.5rem)] sm:max-w-[86%] sm:px-4",
           isUser
             ? "bg-user-message text-user-message-foreground"
             : "border border-border bg-background text-foreground",
@@ -2096,7 +2105,7 @@ function MessageBubble({
         ) : null}
       </div>
       {isUser ? (
-        <div className="mt-1 grid size-8 shrink-0 place-items-center rounded-md bg-muted">
+        <div className="mt-1 hidden size-8 shrink-0 place-items-center rounded-md bg-muted min-[420px]:grid">
           <UserRound className="size-4" />
         </div>
       ) : null}
