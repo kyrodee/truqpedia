@@ -117,11 +117,11 @@ export function AuthPage({ mode, nextPath = "/chat" }: AuthPageProps) {
         </Link>
       </div>
 
-      <div className="mx-auto grid min-h-[calc(100dvh-4rem)] max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,450px)] lg:items-stretch lg:py-0">
+      <div className="mx-auto grid min-h-[calc(100dvh-4rem)] max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,450px)] lg:items-center lg:py-0">
         <AuthShowcase isSignup={isSignup} />
 
-        <section className="flex min-w-0 items-stretch justify-center">
-          <div className="flex w-full max-w-md flex-col justify-center rounded-md border border-border bg-background p-4 shadow-sm sm:p-6 lg:min-h-[680px]">
+        <section className="flex min-w-0 justify-center">
+          <div className="flex w-full max-w-md flex-col rounded-md border border-border bg-background p-4 shadow-sm sm:p-6 lg:max-w-[420px]">
             <div className="grid grid-cols-2 rounded-md bg-muted p-1 text-sm">
               <Link
                 href={loginHref}
@@ -143,21 +143,21 @@ export function AuthPage({ mode, nextPath = "/chat" }: AuthPageProps) {
               </Link>
             </div>
 
-            <div className="mt-6">
-              <div className="grid size-11 place-items-center rounded-md bg-primary text-primary-foreground">
+            <div className="mt-5">
+              <div className="grid size-10 place-items-center rounded-md bg-primary text-primary-foreground">
                 <ShieldCheck className="size-5" />
               </div>
-              <h1 className="mt-4 text-2xl font-semibold tracking-normal">
+              <h1 className="mt-3 text-2xl font-semibold tracking-normal">
                 {isSignup ? "Crie sua conta" : "Entre no Truqpedia"}
               </h1>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              <p className="mt-2 text-sm leading-6 text-muted-foreground lg:leading-5">
                 {isSignup
                   ? "Organize atendimento, projetos e respostas técnicas em um workspace feito para autopeças."
                   : "Continue de onde parou com seus projetos, conversas e histórico técnico."}
               </p>
             </div>
 
-            <form className="mt-6 space-y-4" onSubmit={submit}>
+            <form className="mt-5 space-y-3.5" onSubmit={submit}>
               {isSignup ? (
                 <>
                   <Field
@@ -230,7 +230,7 @@ export function AuthPage({ mode, nextPath = "/chat" }: AuthPageProps) {
               </div>
             ) : null}
 
-            <div className="mt-5 border-t border-border pt-4 text-sm text-muted-foreground">
+            <div className="mt-4 border-t border-border pt-4 text-sm text-muted-foreground">
               {isSignup ? (
                 <>
                   Já tem conta?{" "}
@@ -304,7 +304,7 @@ function Field({
 function AuthShowcase({ isSignup }: { isSignup: boolean }) {
   return (
     <section className="hidden min-w-0 lg:flex">
-      <div className="flex min-h-[680px] w-full max-w-2xl flex-col items-start justify-center">
+      <div className="flex min-h-[600px] w-full max-w-2xl flex-col items-start justify-center">
         <div className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm">
           <Sparkles className="size-4 text-primary" />
           {isSignup ? "Comece com o workspace completo" : "Bem-vindo de volta"}
