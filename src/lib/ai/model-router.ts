@@ -120,6 +120,11 @@ export function buildProviderMessages(input: {
   preferences?: AssistantPreferences;
   intent?: IntentClassification;
   memory?: ConversationMemory | null;
+  searchAttempt?: {
+    enabled: boolean;
+    query: string;
+    sourceCount: number;
+  };
 }) {
   const searchContext =
     input.sources.length > 0
@@ -128,16 +133,17 @@ export function buildProviderMessages(input: {
             (source, index) =>
               `[${index + 1}] ${source.title}\nURL: ${source.url}\nResumo: ${source.snippet}`,
           )
-          .join("\n\n")}\n\nUse marcadores de citacao no corpo da resposta, como [1] ou [2], sempre que uma afirmacao vier dessas fontes. Nao crie uma secao longa de links no final: a interface ja mostra as fontes consultadas de forma discreta. Nao invente fontes nem atribua uma fonte a uma afirmacao que ela nao sustenta.`
+          .join("\n\n")}\n\nUse marcadores de citacao no corpo da resposta, como [1] ou [2], sempre que uma afirmacao vier dessas fontes. Nao crie uma secao longa de links no final: a interface ja mostra as fontes consultadas de forma discreta. Nao invente fontes nem atribua uma fonte a uma afirmacao que ela nao sustenta. Para codigo/referencia: se a fonte nao mencionar explicitamente o codigo pesquisado, nao trate como confirmacao da peca; no maximo cite como catalogo/local onde consultar.`
       : "";
   const preferenceContext = buildPreferenceContext(input.preferences);
   const intentContext = buildIntentContext(input.intent);
   const memoryContext = memoryToPrompt(input.memory);
+  const searchAttemptContext = buildSearchAttemptContext(input.searchAttempt);
 
   const messages: ProviderMessage[] = [
     {
       role: "system",
-      content: `${SYSTEM_PROMPT}${preferenceContext}${memoryContext}${intentContext}${searchContext}`,
+      content: `${SYSTEM_PROMPT}${preferenceContext}${memoryContext}${intentContext}${searchContext}${searchAttemptContext}`,
     },
     ...input.history
       .filter((message) => message.role !== "system")
@@ -197,11 +203,38 @@ function buildIntentGuardrails(intent: IntentClassification) {
 - Entregue o anuncio compacto e pronto para colar. Evite observacoes longas depois do texto pronto.`;
   }
 
+  if (intent.id === "cross_reference") {
+    return `\nRegra especifica para referencia/codigo isolado:
+- Se o usuario so tiver uma referencia, nao fique repetindo perguntas genericas. Use a referencia como ponto de partida e seja pratico.
+- Priorize: o que a referencia parece ser, fontes/indicios encontrados, nivel de confianca, e proximo passo direto.
+- Se nao houver fonte confiavel, diga isso claramente e sugira acoes concretas: pesquisar em catalogo do fabricante, fornecedor, etiqueta/foto, ou cruzamento por marca.`;
+  }
+
   if (intent.id === "diagnosis" && intent.riskLevel === "high_risk") {
     return `\nRegra especifica para diagnostico de alto risco: deixe claro quando nao e seguro seguir rodando, especialmente em freio, direcao, suspensao, pneu, eixo ou motor.`;
   }
 
   return "";
+}
+
+function buildSearchAttemptContext(
+  searchAttempt:
+    | {
+        enabled: boolean;
+        query: string;
+        sourceCount: number;
+      }
+    | undefined,
+) {
+  if (!searchAttempt?.enabled) {
+    return "";
+  }
+
+  if (searchAttempt.sourceCount > 0) {
+    return `\n\nBusca externa executada para: "${searchAttempt.query}". Foram encontradas ${searchAttempt.sourceCount} fontes. Use apenas o que as fontes sustentam.`;
+  }
+
+  return `\n\nBusca externa executada para: "${searchAttempt.query}", mas nenhuma fonte confiavel foi encontrada. Nao diga que encontrou resultados. Seja pratico e curto: diga que nao achou fonte publica confiavel para a referencia, entregue 3 proximos passos concretos e, se fizer sentido, uma mensagem pronta para enviar ao fornecedor. Nao termine com perguntas abertas nem repita uma lista longa de dados faltantes.`;
 }
 
 function appendTaskContext(

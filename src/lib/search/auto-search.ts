@@ -1,4 +1,8 @@
-import type { IntentClassification, UploadedAttachment } from "@/lib/types";
+import type {
+  ChatMessage,
+  IntentClassification,
+  UploadedAttachment,
+} from "@/lib/types";
 
 export type SearchDecision = {
   enabled: boolean;
@@ -8,41 +12,57 @@ export type SearchDecision = {
 };
 
 const searchIntentPatterns = [
-  /\b(aplica[cç][aã]o|serve|compat[ií]vel|equival[eê]ncia|equivalente)\b/i,
-  /\b(c[oó]digo|refer[eê]ncia|part number|oem|sku)\b/i,
-  /\b(cat[aá]logo|fabricante|manual|datasheet|ficha t[eé]cnica)\b/i,
-  /\b(pre[cç]o|mercado|lan[cç]amento|atual|202[0-9]|novo)\b/i,
-  /\b(an[uú]ncio|marketplace|palavra-chave|descri[cç][aã]o)\b/i,
+  /\b(aplicacao|serve|compativel|equivalencia|equivalente)\b/i,
+  /\b(codigo|referencia|part number|oem|sku)\b/i,
+  /\b(catalogo|fabricante|manual|datasheet|ficha tecnica)\b/i,
+  /\b(preco|mercado|lancamento|atual|202[0-9]|novo)\b/i,
+  /\b(anuncio|marketplace|palavra-chave|descricao)\b/i,
 ];
 
 const codeLikePattern = /\b[A-Z]{1,5}[-\s]?\d{3,}[A-Z0-9-]*\b/i;
+const numericReferencePattern = /\b\d{6,14}\b/;
+const explicitSearchPattern =
+  /\b(busca|buscar|pesquisa|pesquisar|procura|procurar|consulta|consultar|acha|achar|encontra|encontrar|internet|google)\b/i;
 
 export function decideWebSearch(input: {
   message: string;
   attachments: UploadedAttachment[];
   requested?: boolean | "auto";
   intent?: IntentClassification;
+  history?: ChatMessage[];
 }): SearchDecision {
   const message = input.message.trim();
+  const contextReference = extractLastReference(input.history ?? []);
+  const queryBase =
+    hasReference(message) || !contextReference
+      ? message
+      : `${contextReference} ${message}`;
 
   if (input.intent?.id === "casual_conversation") {
     return {
       enabled: false,
       reason: "Conversa casual; sem necessidade de pesquisa externa.",
       query: message,
-      activities: [
-        "Lendo o tom da conversa",
-        "Respondendo de forma breve",
-      ],
+      activities: ["Lendo o tom da conversa", "Respondendo de forma breve"],
     };
   }
 
   if (input.requested === true) {
-    return buildDecision(true, message, "Pesquisa solicitada pelo usuario.", input.intent);
+    return buildDecision(
+      true,
+      queryBase,
+      "Pesquisa solicitada pelo usuario.",
+      input.intent,
+    );
   }
 
   if (input.requested === false) {
-    return buildDecision(false, message, "Resposta com base no contexto informado.", input.intent);
+    return buildDecision(
+      false,
+      queryBase,
+      "Resposta com base no contexto informado.",
+      input.intent,
+    );
   }
 
   const hasAttachmentText = input.attachments.some((attachment) => attachment.text);
@@ -52,25 +72,30 @@ export function decideWebSearch(input: {
     ["application_check", "cross_reference", "purchase_checklist"].includes(
       input.intent.id,
     );
+  const userExplicitlyAskedSearch = explicitSearchPattern.test(message);
   const shouldSearch =
-    codeLikePattern.test(message) ||
+    hasReference(message) ||
+    (userExplicitlyAskedSearch && Boolean(contextReference)) ||
     intentSuggestsSearch ||
-    searchIntentPatterns.some((pattern) => pattern.test(message));
+    userExplicitlyAskedSearch ||
+    searchIntentPatterns.some((pattern) => pattern.test(normalize(message)));
 
   if (shouldSearch) {
     return buildDecision(
       true,
-      message,
-      hasAttachmentText
-        ? "Ha anexos, mas a pergunta pede validacao externa."
-        : "A pergunta pode depender de catalogo, codigo ou informacao atual.",
+      queryBase,
+      userExplicitlyAskedSearch && contextReference && !hasReference(message)
+        ? `Pesquisa solicitada usando a ultima referencia citada: ${contextReference}.`
+        : hasAttachmentText
+          ? "Ha anexos, mas a pergunta pede validacao externa."
+          : "A pergunta pode depender de catalogo, codigo ou informacao atual.",
       input.intent,
     );
   }
 
   return buildDecision(
     false,
-    message,
+    queryBase,
     hasAttachmentText
       ? "Usando os anexos e a conversa antes de buscar fora."
       : "A pergunta parece conceitual ou operacional.",
@@ -107,8 +132,39 @@ function enrichQuery(message: string, intent?: IntentClassification) {
   return [
     message,
     intent?.searchHint,
-    "autopecas caminhao onibus peca pesada catalogo aplicacao equivalencia",
+    "autopecas caminhao onibus peca pesada catalogo aplicacao equivalencia codigo referencia",
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function hasReference(message: string) {
+  return codeLikePattern.test(message) || numericReferencePattern.test(message);
+}
+
+function extractLastReference(history: ChatMessage[]) {
+  for (const message of history.slice(-10).reverse()) {
+    const numericReferences = message.content.match(/\b\d{6,14}\b/g);
+
+    if (numericReferences?.length) {
+      return numericReferences.at(-1)?.trim() ?? null;
+    }
+
+    const codeReferences = message.content.match(
+      /\b[A-Z]{1,4}[-\s]?\d{3,}[A-Z0-9-]*\b/gi,
+    );
+
+    if (codeReferences?.length) {
+      return codeReferences.at(-1)?.replace(/\s+/g, "").trim() ?? null;
+    }
+  }
+
+  return null;
+}
+
+function normalize(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }

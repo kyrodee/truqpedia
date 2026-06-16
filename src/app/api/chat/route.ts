@@ -296,6 +296,7 @@ export async function POST(request: NextRequest) {
         attachments: body.attachments,
         requested: body.webSearch,
         intent,
+        history,
       });
 
       const send = (event: StreamEvent) => {
@@ -311,8 +312,16 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        const intentActivities = searchDecision.reason.includes(
+          "ultima referencia",
+        )
+          ? [
+              "Classificando a intencao da pergunta",
+              "Preparando busca pela referencia citada",
+            ]
+          : intent.activities;
         const initialActivities = [
-          ...intent.activities,
+          ...intentActivities,
           ...searchDecision.activities,
         ].filter(uniqueLabels);
 
@@ -360,6 +369,11 @@ export async function POST(request: NextRequest) {
           preferences: body.preferences,
           intent,
           memory: conversationMemory,
+          searchAttempt: {
+            enabled: searchDecision.enabled,
+            query: searchDecision.query,
+            sourceCount: sources.length,
+          },
         });
 
         await recordUsageLog({

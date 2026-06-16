@@ -105,6 +105,7 @@ const intentProfiles: Record<ChatIntentId, IntentProfile> = {
 };
 
 const codeLikePattern = /\b[A-Z]{1,5}[-\s]?\d{3,}[A-Z0-9-]*\b/i;
+const numericReferencePattern = /\b\d{6,14}\b/;
 const vinPattern = /\b[A-HJ-NPR-Z0-9]{17}\b/i;
 
 const keywordMap: Record<ChatIntentId, string[]> = {
@@ -235,7 +236,9 @@ export function classifyChatIntent(input: IntentInput): IntentClassification {
   const scores = buildInitialScores();
   const hasAttachment = attachments.length > 0;
   const hasAttachmentText = attachments.some((attachment) => attachment.text);
-  const hasCode = codeLikePattern.test(input.message);
+  const hasCode =
+    codeLikePattern.test(input.message) ||
+    numericReferencePattern.test(input.message);
   const asksCompatibilityDecision = hasAny(normalizedMessage, [
     "da para anunciar como",
     "posso anunciar como",

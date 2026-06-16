@@ -11,13 +11,17 @@ export async function searchWeb(query: string): Promise<SourceResult[]> {
     "serper",
     "duckduckgo",
   ];
+  const reference = extractReferenceFromQuery(query);
 
   for (const provider of providers) {
     try {
       const results = await runSearch(provider, query);
+      const filteredResults = reference
+        ? filterResultsByReference(results, reference)
+        : results;
 
-      if (results.length > 0) {
-        return results.slice(0, 5);
+      if (filteredResults.length > 0) {
+        return filteredResults.slice(0, 5);
       }
     } catch {
       continue;
@@ -25,6 +29,35 @@ export async function searchWeb(query: string): Promise<SourceResult[]> {
   }
 
   return [];
+}
+
+function extractReferenceFromQuery(query: string) {
+  const numericReference = query.match(/\b\d{6,14}\b/)?.[0];
+
+  if (numericReference) {
+    return normalizeReference(numericReference);
+  }
+
+  const codeReference = query.match(/\b[A-Z]{1,4}[-\s]?\d{3,}[A-Z0-9-]*\b/i)?.[0];
+
+  return codeReference ? normalizeReference(codeReference) : null;
+}
+
+function filterResultsByReference(
+  results: SourceResult[],
+  reference: string,
+) {
+  return results.filter((result) => {
+    const haystack = normalizeReference(
+      `${result.title} ${result.snippet} ${result.url}`,
+    );
+
+    return haystack.includes(reference);
+  });
+}
+
+function normalizeReference(value: string) {
+  return value.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
 async function runSearch(provider: SearchProvider, query: string) {

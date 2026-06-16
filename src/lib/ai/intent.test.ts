@@ -43,6 +43,14 @@ describe("classifyChatIntent", () => {
     expect(intent.responseShape).toContain("titulo pronto");
   });
 
+  it("detects numeric-only references as code cross-reference", () => {
+    const intent = classifyChatIntent({
+      message: "0002501666",
+    });
+
+    expect(intent.id).toBe("cross_reference");
+  });
+
   it("detects high-risk diagnosis requests", () => {
     const intent = classifyChatIntent({
       message: "Meu caminhao esta com barulho no freio e vazamento",

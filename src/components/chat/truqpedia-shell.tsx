@@ -134,6 +134,8 @@ const workflowPrompts = [
   },
 ];
 
+const MIN_ACTIVITY_DWELL_MS = 3200;
+
 export function TruqpediaShell({
   user,
   initialConversations,
@@ -166,6 +168,13 @@ export function TruqpediaShell({
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
   const [deletingAllChats, setDeletingAllChats] = useState(false);
+  const [renameConversationTarget, setRenameConversationTarget] =
+    useState<UiConversation | null>(null);
+  const [renameConversationTitle, setRenameConversationTitle] = useState("");
+  const [renamingConversation, setRenamingConversation] = useState(false);
+  const [deleteConversationTarget, setDeleteConversationTarget] =
+    useState<UiConversation | null>(null);
+  const [deletingConversation, setDeletingConversation] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
@@ -318,10 +327,26 @@ export function TruqpediaShell({
     const decoder = new TextDecoder();
     let buffer = "";
     let currentSources: SourceResult[] = [];
+    let firstTokenRevealed = false;
+    let revealAfter = Date.now() + MIN_ACTIVITY_DWELL_MS;
 
     if (!reader) {
       return;
     }
+
+    const waitUntilActivityIsReadable = async () => {
+      if (firstTokenRevealed) {
+        return;
+      }
+
+      const remaining = revealAfter - Date.now();
+
+      if (remaining > 0) {
+        await sleep(remaining);
+      }
+
+      firstTokenRevealed = true;
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -346,6 +371,7 @@ export function TruqpediaShell({
         const event = JSON.parse(line.slice(5).trim()) as StreamEvent;
 
         if (event.type === "activity") {
+          revealAfter = Date.now() + MIN_ACTIVITY_DWELL_MS;
           setMessages((current) =>
             current.map((message) =>
               message.id === assistantId
@@ -407,11 +433,12 @@ export function TruqpediaShell({
           currentSources = event.sources;
           updateMessage(assistantId, {
             sources: currentSources,
-            status: "streaming",
+            status: firstTokenRevealed ? "streaming" : "searching",
           });
         }
 
         if (event.type === "token") {
+          await waitUntilActivityIsReadable();
           appendToMessage(assistantId, event.token);
         }
 
@@ -772,47 +799,115 @@ export function TruqpediaShell({
     );
   }
 
-  async function renameConversation(conversation: UiConversation) {
-    const title = window.prompt("Novo nome da conversa", conversation.title);
-
-    if (!title?.trim()) {
+  function openRenameConversationDialog(conversation: UiConversation) {
+    if (isStreaming) {
       return;
     }
 
-    const response = await fetch(`/api/conversations/${conversation.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: title.trim() }),
-    });
+    setRenameConversationTarget(conversation);
+    setRenameConversationTitle(conversation.title);
+  }
 
-    if (response.ok) {
+  async function renameConversation(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+
+    if (!renameConversationTarget) {
+      return;
+    }
+
+    const title = renameConversationTitle.trim();
+
+    if (!title) {
+      return;
+    }
+
+    setRenamingConversation(true);
+
+    try {
+      const response = await fetch(
+        `/api/conversations/${renameConversationTarget.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        },
+      );
+
+      if (!response.ok) {
+        setStatus("Nao foi possivel renomear a conversa.");
+        return;
+      }
+
+      const data = (await response.json()) as {
+        conversation: {
+          id: string;
+          title: string;
+          mode: ChatMode;
+          created_at: string;
+          updated_at: string;
+        };
+      };
       setConversations((current) =>
         current.map((item) =>
-          item.id === conversation.id ? { ...item, title: title.trim() } : item,
+          item.id === renameConversationTarget.id
+            ? {
+                ...item,
+                title: data.conversation.title,
+                updatedAt: data.conversation.updated_at,
+              }
+            : item,
         ),
       );
+      setRenameConversationTarget(null);
+      setRenameConversationTitle("");
+    } catch {
+      setStatus("Nao foi possivel renomear a conversa.");
+    } finally {
+      setRenamingConversation(false);
     }
   }
 
-  async function deleteConversation(conversation: UiConversation) {
-    const confirmed = window.confirm(`Excluir "${conversation.title}"?`);
-
-    if (!confirmed) {
+  function openDeleteConversationDialog(conversation: UiConversation) {
+    if (isStreaming) {
       return;
     }
 
-    const response = await fetch(`/api/conversations/${conversation.id}`, {
-      method: "DELETE",
-    });
+    setDeleteConversationTarget(conversation);
+  }
 
-    if (response.ok) {
-      setConversations((current) =>
-        current.filter((item) => item.id !== conversation.id),
+  async function deleteConversation() {
+    if (!deleteConversationTarget) {
+      return;
+    }
+
+    setDeletingConversation(true);
+
+    try {
+      const response = await fetch(
+        `/api/conversations/${deleteConversationTarget.id}`,
+        {
+          method: "DELETE",
+        },
       );
 
-      if (activeConversationId === conversation.id) {
+      if (!response.ok) {
+        setStatus("Nao foi possivel excluir a conversa.");
+        return;
+      }
+
+      const deletedId = deleteConversationTarget.id;
+      setConversations((current) =>
+        current.filter((item) => item.id !== deletedId),
+      );
+
+      if (activeConversationId === deletedId) {
         newConversation();
       }
+      setDeleteConversationTarget(null);
+    } catch {
+      setStatus("Nao foi possivel excluir a conversa.");
+    } finally {
+      setDeletingConversation(false);
     }
   }
 
@@ -1073,14 +1168,18 @@ export function TruqpediaShell({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
-                              onClick={() => renameConversation(conversation)}
+                              onClick={() =>
+                                openRenameConversationDialog(conversation)
+                              }
                             >
                               <Pencil />
                               Renomear
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
-                              onClick={() => deleteConversation(conversation)}
+                              onClick={() =>
+                                openDeleteConversationDialog(conversation)
+                              }
                             >
                               <Trash2 />
                               Excluir
@@ -1434,6 +1533,29 @@ export function TruqpediaShell({
           open={projectModalOpen}
           saving={projectSaving}
         />
+        <ConversationRenameDialog
+          conversation={renameConversationTarget}
+          onOpenChange={(open) => {
+            if (!open) {
+              setRenameConversationTarget(null);
+              setRenameConversationTitle("");
+            }
+          }}
+          onSubmit={renameConversation}
+          onTitleChange={setRenameConversationTitle}
+          saving={renamingConversation}
+          title={renameConversationTitle}
+        />
+        <ConversationDeleteDialog
+          conversation={deleteConversationTarget}
+          deleting={deletingConversation}
+          onConfirm={() => void deleteConversation()}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDeleteConversationTarget(null);
+            }
+          }}
+        />
         <ArtifactPanel
           artifact={activeArtifact}
           artifacts={artifacts}
@@ -1447,6 +1569,124 @@ export function TruqpediaShell({
         />
       </div>
     </TooltipProvider>
+  );
+}
+
+function ConversationRenameDialog({
+  conversation,
+  onOpenChange,
+  onSubmit,
+  onTitleChange,
+  saving,
+  title,
+}: {
+  conversation: UiConversation | null;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
+  onTitleChange: (title: string) => void;
+  saving: boolean;
+  title: string;
+}) {
+  return (
+    <Dialog open={Boolean(conversation)} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Renomear conversa</DialogTitle>
+          <DialogDescription>
+            Dê um nome curto para encontrar este atendimento mais rápido depois.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form className="space-y-4" onSubmit={onSubmit}>
+          <div className="space-y-2">
+            <Label htmlFor="conversation-title">Nome da conversa</Label>
+            <Input
+              id="conversation-title"
+              autoFocus
+              maxLength={120}
+              placeholder="Ex: Volvo FH - embreagem Sachs"
+              value={title}
+              onChange={(event) => onTitleChange(event.target.value)}
+              required
+            />
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              className="w-full sm:w-auto"
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="w-full sm:w-auto"
+              disabled={!title.trim() || saving}
+            >
+              <Pencil className="size-4" />
+              {saving ? "Salvando..." : "Salvar nome"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ConversationDeleteDialog({
+  conversation,
+  deleting,
+  onConfirm,
+  onOpenChange,
+}: {
+  conversation: UiConversation | null;
+  deleting: boolean;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={Boolean(conversation)} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Excluir conversa</DialogTitle>
+          <DialogDescription>
+            Esta ação remove o chat e suas mensagens salvas. Não dá para
+            desfazer.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-md border border-border bg-muted/70 p-3 text-sm">
+          <div className="font-medium text-foreground">
+            {conversation?.title ?? "Conversa"}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {conversation ? relativeTime(conversation.updatedAt) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            className="w-full sm:w-auto"
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancelar
+          </Button>
+          <Button
+            className="w-full sm:w-auto"
+            type="button"
+            variant="destructive"
+            disabled={deleting}
+            onClick={onConfirm}
+          >
+            <Trash2 className="size-4" />
+            {deleting ? "Excluindo..." : "Excluir conversa"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -2294,4 +2534,8 @@ function readGuestCount() {
 
   const match = document.cookie.match(/(?:^|; )truqpedia_guest_count=(\d+)/);
   return Number(match?.[1] ?? 0);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
