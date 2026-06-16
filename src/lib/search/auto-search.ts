@@ -33,8 +33,12 @@ export function decideWebSearch(input: {
 }): SearchDecision {
   const message = input.message.trim();
   const contextReference = extractLastReference(input.history ?? []);
-  const queryBase =
-    hasReference(message) || !contextReference
+  const userExplicitlyAskedSearch = explicitSearchPattern.test(message);
+  const useContextReferenceAsPrimaryQuery =
+    userExplicitlyAskedSearch && contextReference && !hasReference(message);
+  const queryBase = useContextReferenceAsPrimaryQuery
+    ? contextReference
+    : hasReference(message) || !contextReference
       ? message
       : `${contextReference} ${message}`;
 
@@ -72,7 +76,6 @@ export function decideWebSearch(input: {
     ["application_check", "cross_reference", "purchase_checklist"].includes(
       input.intent.id,
     );
-  const userExplicitlyAskedSearch = explicitSearchPattern.test(message);
   const shouldSearch =
     hasReference(message) ||
     (userExplicitlyAskedSearch && Boolean(contextReference)) ||
@@ -129,6 +132,10 @@ function buildDecision(
 }
 
 function enrichQuery(message: string, intent?: IntentClassification) {
+  if (isReferenceOnlyQuery(message)) {
+    return message.trim();
+  }
+
   return [
     message,
     intent?.searchHint,
@@ -140,6 +147,17 @@ function enrichQuery(message: string, intent?: IntentClassification) {
 
 function hasReference(message: string) {
   return codeLikePattern.test(message) || numericReferencePattern.test(message);
+}
+
+function isReferenceOnlyQuery(message: string) {
+  const trimmed = message.trim();
+
+  return (
+    trimmed.length > 0 &&
+    hasReference(trimmed) &&
+    trimmed.replace(/\b(?:[A-Z]{1,5}[-\s]?\d{3,}[A-Z0-9-]*|\d{6,14})\b/gi, "").trim()
+      .length === 0
+  );
 }
 
 function extractLastReference(history: ChatMessage[]) {

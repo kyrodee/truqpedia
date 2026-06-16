@@ -27,7 +27,7 @@ describe("decideWebSearch", () => {
     });
 
     expect(decision.enabled).toBe(true);
-    expect(decision.query).toContain("0002501666");
+    expect(decision.query.startsWith("0002501666")).toBe(true);
     expect(decision.reason).toContain("ultima referencia");
   });
 });
