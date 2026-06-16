@@ -104,7 +104,7 @@ const intentProfiles: Record<ChatIntentId, IntentProfile> = {
   },
 };
 
-const codeLikePattern = /\b[A-Z]{1,5}[-\s]?\d{3,}[A-Z0-9-]*\b/i;
+const codeLikePattern = /\b[A-Z]{1,4}[-\s]?\d{3,}[A-Z0-9-]*\b/i;
 const numericReferencePattern = /\b\d{6,14}\b/;
 const vinPattern = /\b[A-HJ-NPR-Z0-9]{17}\b/i;
 

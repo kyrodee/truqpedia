@@ -19,7 +19,7 @@ const searchIntentPatterns = [
   /\b(anuncio|marketplace|palavra-chave|descricao)\b/i,
 ];
 
-const codeLikePattern = /\b[A-Z]{1,5}[-\s]?\d{3,}[A-Z0-9-]*\b/i;
+const codeLikePattern = /\b[A-Z]{1,4}[-\s]?\d{3,}[A-Z0-9-]*\b/i;
 const numericReferencePattern = /\b\d{6,14}\b/;
 const explicitSearchPattern =
   /\b(busca|buscar|pesquisa|pesquisar|procura|procurar|consulta|consultar|acha|achar|encontra|encontrar|internet|google)\b/i;
@@ -70,6 +70,7 @@ export function decideWebSearch(input: {
   }
 
   const hasAttachmentText = input.attachments.some((attachment) => attachment.text);
+  const hasAttachment = input.attachments.length > 0;
   const intentSuggestsSearch =
     input.intent &&
     input.intent.confidence >= 0.58 &&
@@ -82,6 +83,36 @@ export function decideWebSearch(input: {
     intentSuggestsSearch ||
     userExplicitlyAskedSearch ||
     searchIntentPatterns.some((pattern) => pattern.test(normalize(message)));
+
+  if (
+    input.intent?.id === "marketplace_copy" &&
+    hasAttachmentText &&
+    !userExplicitlyAskedSearch &&
+    !hasReference(message)
+  ) {
+    return buildDecision(
+      false,
+      queryBase,
+      "Usando o texto do anexo para montar o anuncio antes de buscar fora.",
+      input.intent,
+    );
+  }
+
+  if (
+    hasAttachment &&
+    !hasAttachmentText &&
+    input.intent &&
+    ["application_check", "document_analysis"].includes(input.intent.id) &&
+    !hasReference(message) &&
+    !userExplicitlyAskedSearch
+  ) {
+    return buildDecision(
+      false,
+      queryBase,
+      "Sem texto legivel no anexo; melhor pedir codigo ou transcricao antes de buscar fora.",
+      input.intent,
+    );
+  }
 
   if (shouldSearch) {
     return buildDecision(
@@ -155,7 +186,7 @@ function isReferenceOnlyQuery(message: string) {
   return (
     trimmed.length > 0 &&
     hasReference(trimmed) &&
-    trimmed.replace(/\b(?:[A-Z]{1,5}[-\s]?\d{3,}[A-Z0-9-]*|\d{6,14})\b/gi, "").trim()
+    trimmed.replace(/\b(?:[A-Z]{1,4}[-\s]?\d{3,}[A-Z0-9-]*|\d{6,14})\b/gi, "").trim()
       .length === 0
   );
 }

@@ -200,6 +200,7 @@ function buildIntentGuardrails(intent: IntentClassification) {
 - Use somente fatos informados pelo usuario, anexos ou fontes. Nao invente origem da peca, retirada de veiculo, fotos, garantia, nota fiscal, entrega, prazo, estoque, teste feito, condicao visual ou compatibilidade confirmada.
 - Se algo foi informado mas nao comprovado, escreva de forma prudente: "codigo informado", "original informado" ou "aplicacao anotada/possivel".
 - Troque promessas por cautela objetiva: "compatibilidade a confirmar pelo codigo, catalogo ou chassi/VIN".
+- No bloco "Confirmar antes da compra", liste apenas itens que precisam ser confirmados. Nunca escreva "compatibilidade confirmada".
 - Entregue o anuncio compacto e pronto para colar. Evite observacoes longas depois do texto pronto.`;
   }
 
@@ -231,7 +232,7 @@ function buildSearchAttemptContext(
   }
 
   if (searchAttempt.sourceCount > 0) {
-    return `\n\nBusca externa executada para: "${searchAttempt.query}". Foram encontradas ${searchAttempt.sourceCount} fontes. Use apenas o que as fontes sustentam.`;
+    return `\n\nBusca externa executada para: "${searchAttempt.query}". Foram encontradas ${searchAttempt.sourceCount} fontes. Use apenas o que as fontes sustentam. Se a busca era por referencia/codigo, responda de forma objetiva: o que a referencia parece ser, nivel de confianca, por que ainda precisa confirmar, e um proximo passo direto. Evite terminar com pergunta aberta generica.`;
   }
 
   return `\n\nBusca externa executada para: "${searchAttempt.query}", mas nenhuma fonte confiavel foi encontrada. Nao diga que encontrou resultados. Seja pratico e curto: diga que nao achou fonte publica confiavel para a referencia, entregue 3 proximos passos concretos e, se fizer sentido, uma mensagem pronta para enviar ao fornecedor. Nao termine com perguntas abertas nem repita uma lista longa de dados faltantes.`;
@@ -262,6 +263,7 @@ Restricao obrigatoria para esta resposta de venda:
 - Entregue somente o texto pronto em formato compacto: Titulo, Descricao, Aplicacao/compatibilidade, Confirmar antes da compra e Palavras-chave.
 - O anuncio sera considerado errado se afirmar qualquer dado nao informado pelo usuario, anexo ou fonte.
 - Nao use estas ideias/frases a menos que estejam explicitamente no pedido ou anexo: "boas condicoes", "sem danos visiveis", "retirado de veiculo", "testado", "garantia", "nota fiscal", "entrega", "ver fotos", "pronta entrega", "compativel confirmado".
+- No bloco "Confirmar antes da compra", escreva so os itens pendentes, como "compatibilidade", "estado visual" ou "origem". Nao escreva "compatibilidade confirmada".
 - Para estado visual, garantia, origem, entrega e compatibilidade, use "a confirmar" quando faltar dado.`;
 }
 
@@ -311,7 +313,7 @@ function appendAttachmentContext(
       const header = `Arquivo ${index + 1}: ${attachment.name} (${attachment.type || "tipo desconhecido"}, ${attachment.size} bytes)`;
 
       if (!attachment.text) {
-        return `${header}\nConteudo textual nao extraido automaticamente. Nao finja ter lido o arquivo. Use apenas nome, tipo e tamanho como pistas e peca uma versao legivel, transcricao, foto melhor ou dados especificos se isso for necessario.`;
+        return `${header}\nConteudo textual nao extraido automaticamente. Nao finja ter lido o arquivo. Use apenas nome, tipo e tamanho como pistas. Se precisar do conteudo, peca de forma curta uma transcricao do codigo/etiqueta ou uma foto mais legivel, sem fazer uma lista longa de perguntas.`;
       }
 
       return `${header}${attachment.truncated ? "\nConteudo truncado para caber no contexto." : ""}\n\n${attachment.text}`;
