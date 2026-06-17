@@ -110,6 +110,8 @@ Configure one or more keys:
 
 The router loads provider priorities and model names from `public.ai_provider_settings`. If Supabase service credentials are not available, it uses safe defaults from `src/lib/ai/model-router.ts`.
 
+The default Groq deep model is `openai/gpt-oss-120b`, with `llama-3.3-70b-versatile` as a same-provider fallback before the router moves to the next provider.
+
 ## Web search
 
 Optional keys:

@@ -150,7 +150,7 @@ create table if not exists public.knowledge_chunks (
   document_id uuid references public.document_assets(id) on delete cascade,
   owner_user_id uuid references auth.users(id) on delete cascade,
   content text not null,
-  embedding vector(1536),
+  embedding vector(768),
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
@@ -273,20 +273,21 @@ as $$
 $$;
 
 insert into public.ai_provider_settings
-  (id, display_name, enabled, priority, speed_model, deep_model, base_url, timeout_ms)
+  (id, display_name, enabled, priority, speed_model, deep_model, base_url, timeout_ms, metadata)
 values
-  ('groq', 'Groq', true, 10, 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'https://api.groq.com/openai/v1', 20000),
-  ('openrouter', 'OpenRouter', true, 20, 'meta-llama/llama-3.1-8b-instruct:free', 'anthropic/claude-3.5-sonnet', 'https://openrouter.ai/api/v1', 25000),
-  ('gemini', 'Gemini', true, 30, 'gemini-1.5-flash', 'gemini-1.5-pro', null, 25000),
-  ('cohere', 'Cohere', true, 40, 'command-r7b-12-2024', 'command-r-plus', null, 25000),
-  ('grok', 'Grok / xAI', true, 50, 'grok-3-mini', 'grok-3', 'https://api.x.ai/v1', 30000)
+  ('groq', 'Groq', true, 10, 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'https://api.groq.com/openai/v1', 30000, '{"deep_model_fallbacks":["llama-3.3-70b-versatile"]}'::jsonb),
+  ('openrouter', 'OpenRouter', true, 20, 'meta-llama/llama-3.1-8b-instruct:free', 'anthropic/claude-3.5-sonnet', 'https://openrouter.ai/api/v1', 25000, '{}'::jsonb),
+  ('gemini', 'Gemini', true, 30, 'gemini-1.5-flash', 'gemini-1.5-pro', null, 25000, '{}'::jsonb),
+  ('cohere', 'Cohere', true, 40, 'command-r7b-12-2024', 'command-r-plus', null, 25000, '{}'::jsonb),
+  ('grok', 'Grok / xAI', true, 50, 'grok-3-mini', 'grok-3', 'https://api.x.ai/v1', 30000, '{}'::jsonb)
 on conflict (id) do update set
   display_name = excluded.display_name,
   priority = excluded.priority,
   speed_model = excluded.speed_model,
   deep_model = excluded.deep_model,
   base_url = excluded.base_url,
-  timeout_ms = excluded.timeout_ms;
+  timeout_ms = excluded.timeout_ms,
+  metadata = excluded.metadata;
 
 alter table public.user_profiles enable row level security;
 alter table public.user_settings enable row level security;
@@ -398,3 +399,71 @@ create policy "integrations_owner_all"
 on public.integration_connections for all
 using (user_id = auth.uid() or public.is_admin())
 with check (user_id = auth.uid() or public.is_admin());
+
+-- Custom RAG hybrid search function
+create or replace function public.match_knowledge_chunks(
+  query_embedding vector(768),
+  match_threshold float,
+  match_count int,
+  filter_collection_id uuid,
+  query_text text
+)
+returns table (
+  id uuid,
+  collection_id uuid,
+  document_id uuid,
+  owner_user_id uuid,
+  content text,
+  metadata jsonb,
+  similarity float
+)
+language plpgsql
+stable
+security definer
+as $$
+begin
+  return query
+  select
+    kc.id,
+    kc.collection_id,
+    kc.document_id,
+    kc.owner_user_id,
+    kc.content,
+    kc.metadata,
+    (1 - (kc.embedding <=> query_embedding))::float as similarity
+  from public.knowledge_chunks kc
+  where kc.collection_id = filter_collection_id
+    and (
+      (1 - (kc.embedding <=> query_embedding)) >= match_threshold
+      or (
+        query_text is not null 
+        and length(query_text) >= 3 
+        and kc.content ilike '%' || query_text || '%'
+      )
+    )
+  order by
+    (case 
+      when query_text is not null and length(query_text) >= 3 and kc.content ilike '%' || query_text || '%' 
+      then 1.5 
+      else 1.0 
+    end) * (1 - (kc.embedding <=> query_embedding)) desc
+  limit match_count;
+end;
+$$;
+
+-- RAG storage bucket settings
+insert into storage.buckets (id, name, public)
+values ('document-assets', 'document-assets', false)
+on conflict (id) do nothing;
+
+create policy "Users can upload their own document assets"
+  on storage.objects for insert
+  with check (bucket_id = 'document-assets' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "Users can read their own document assets"
+  on storage.objects for select
+  using (bucket_id = 'document-assets' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "Users can delete their own document assets"
+  on storage.objects for delete
+  using (bucket_id = 'document-assets' and auth.uid()::text = (storage.foldername(name))[1]);

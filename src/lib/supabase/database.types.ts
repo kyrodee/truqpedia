@@ -225,6 +225,70 @@ export type Database = {
         },
         Partial<Omit<KnowledgeCollectionRow, "id" | "owner_user_id" | "created_at">>
       >;
+      document_assets: Table<
+        {
+          id: string;
+          owner_user_id: string;
+          collection_id: string | null;
+          file_name: string;
+          mime_type: string;
+          storage_path: string;
+          status: "uploaded" | "processing" | "ready" | "failed";
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          owner_user_id: string;
+          collection_id?: string | null;
+          file_name: string;
+          mime_type: string;
+          storage_path: string;
+          status?: "uploaded" | "processing" | "ready" | "failed";
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        },
+        Partial<{
+          collection_id: string | null;
+          file_name: string;
+          mime_type: string;
+          storage_path: string;
+          status: "uploaded" | "processing" | "ready" | "failed";
+          metadata: Json;
+          updated_at: string;
+        }>
+      >;
+      knowledge_chunks: Table<
+        {
+          id: string;
+          collection_id: string;
+          document_id: string | null;
+          owner_user_id: string;
+          content: string;
+          embedding: number[] | null;
+          metadata: Json;
+          created_at: string;
+        },
+        {
+          id?: string;
+          collection_id: string;
+          document_id?: string | null;
+          owner_user_id: string;
+          content: string;
+          embedding?: number[] | null;
+          metadata?: Json;
+          created_at?: string;
+        },
+        Partial<{
+          collection_id: string;
+          document_id: string | null;
+          content: string;
+          embedding: number[] | null;
+          metadata: Json;
+        }>
+      >;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

@@ -17,11 +17,19 @@ export const DEFAULT_SPEED_MODEL = {
 } as const;
 
 export const DEFAULT_DEEP_MODEL = {
-  groq: "llama-3.3-70b-versatile",
+  groq: "openai/gpt-oss-120b",
   openrouter: "anthropic/claude-3.5-sonnet",
   gemini: "gemini-1.5-pro",
   cohere: "command-r-plus",
   grok: "grok-3",
+} as const;
+
+export const DEFAULT_DEEP_MODEL_FALLBACKS = {
+  groq: ["llama-3.3-70b-versatile"],
+  openrouter: [],
+  gemini: [],
+  cohere: [],
+  grok: [],
 } as const;
 
 export const SYSTEM_PROMPT = `Voce e o Truqpedia, um assistente tecnico conversativo para quem trabalha com autopecas, pecas pesadas, caminhoes, onibus, utilitarios, oficina, compras, estoque, e-commerce e atendimento de balcao. Seu papel e pensar junto com o usuario, fazer boas perguntas, reduzir erro de aplicacao, comparar codigos e transformar informacao tecnica em uma decisao clara.

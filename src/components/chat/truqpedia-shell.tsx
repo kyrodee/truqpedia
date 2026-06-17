@@ -3,15 +3,6 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
-  ArrowRight,
-  BadgeCheck,
-  Bot,
-  ClipboardList,
-  Copy,
-  Download,
-  ExternalLink,
-  File,
-  FileText,
   Folder,
   FolderPlus,
   LogIn,
@@ -20,38 +11,30 @@ import {
   MoreHorizontal,
   Paperclip,
   PanelLeftClose,
-  Pencil,
   Plus,
-  RotateCcw,
-  Save,
   Search,
   Send,
   Settings2,
-  ShieldCheck,
-  Trash2,
-  Truck,
   UserRound,
   Wrench,
   X,
+  File,
+  FileText,
+  Pencil,
+  Trash2,
+  Bot,
+  Truck,
+  ClipboardList,
+  ShieldCheck,
+  BadgeCheck,
 } from "lucide-react";
-import { MarkdownMessage } from "@/components/markdown/markdown-message";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -59,39 +42,29 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { TypingIndicator } from "@/components/chat/typing-indicator";
 import { DEFAULT_CHAT_MODE, FREE_MESSAGE_LIMIT } from "@/lib/constants";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type {
   AssistantPreferences,
-  ChatMessage,
   ChatMode,
-  ArtifactSummary,
-  ConversationSummary,
-  ProjectSummary,
-  SourceResult,
-  StreamEvent,
   UploadedAttachment,
 } from "@/lib/types";
 import { cn, relativeTime, truncate } from "@/lib/utils";
-
-type SessionUser = {
-  id: string;
-  email?: string;
-  role?: "user" | "admin";
-};
-
-type UiConversation = ConversationSummary;
-type UiProject = ProjectSummary;
-type UiArtifact = ArtifactSummary;
-
-type UiMessage = ChatMessage & {
-  id: string;
-  status?: "searching" | "streaming" | "error" | "done";
-  sources?: SourceResult[];
-  attachments?: UploadedAttachment[];
-  activities?: Array<{ label: string; detail?: string }>;
-};
+import type {
+  SessionUser,
+  UiConversation,
+  UiProject,
+  UiArtifact,
+  ProjectFile,
+  UiMessage,
+  SourceResult,
+  StreamEvent,
+} from "./types";
+import { ConversationRenameDialog, ConversationDeleteDialog } from "./conversation-dialogs";
+import { ProjectCreateDialog, ProjectSettingsDialog } from "./project-dialogs";
+import { ProjectFilesDialog } from "./project-files-dialog";
+import { ArtifactPanel } from "./artifact-panel";
+import { MessageBubble } from "./message-bubble";
 
 type TruqpediaShellProps = {
   user: SessionUser | null;
@@ -185,6 +158,14 @@ export function TruqpediaShell({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  const [isFilesDialogOpen, setIsFilesDialogOpen] = useState(false);
+  const [filesDialogProject, setFilesDialogProject] = useState<UiProject | null>(null);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
+  const pollTimerRef = useRef<number | null>(null);
+
   const [guestCount, setGuestCount] = useState(0);
   const remainingGuestMessages = Math.max(0, FREE_MESSAGE_LIMIT - guestCount);
   const activeProject =
@@ -202,7 +183,24 @@ export function TruqpediaShell({
 
   useEffect(() => {
     setGuestCount(readGuestCount());
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) {
+        window.clearTimeout(pollTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isFilesDialogOpen && pollTimerRef.current) {
+      window.clearTimeout(pollTimerRef.current);
+    }
+  }, [isFilesDialogOpen]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -671,6 +669,143 @@ export function TruqpediaShell({
     }
   }
 
+  const startPollingFiles = (projectId: string) => {
+    if (pollTimerRef.current) {
+      window.clearTimeout(pollTimerRef.current);
+    }
+
+    pollTimerRef.current = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/projects/${projectId}/files`);
+        if (!response.ok) return;
+        const data = (await response.json()) as { files?: ProjectFile[] };
+        setProjectFiles(data.files ?? []);
+
+        const hasPending = data.files?.some(
+          (f) => f.status === "uploaded" || f.status === "processing"
+        );
+
+        if (hasPending && isFilesDialogOpen) {
+          startPollingFiles(projectId);
+        }
+      } catch (err) {
+        console.error("Error polling files:", err);
+      }
+    }, 2000) as unknown as number;
+  };
+
+  async function loadProjectFiles(projectId: string) {
+    setLoadingFiles(true);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/files`);
+      if (!response.ok) {
+        throw new Error("Erro ao carregar arquivos");
+      }
+      const data = (await response.json()) as { files?: ProjectFile[] };
+      setProjectFiles(data.files ?? []);
+
+      const hasPending = data.files?.some(
+        (f) => f.status === "uploaded" || f.status === "processing"
+      );
+
+      if (hasPending) {
+        startPollingFiles(projectId);
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus("Não foi possível carregar os arquivos.");
+    } finally {
+      setLoadingFiles(false);
+    }
+  }
+
+  function openProjectFilesDialog(project: UiProject) {
+    setFilesDialogProject(project);
+    setIsFilesDialogOpen(true);
+    loadProjectFiles(project.id);
+  }
+
+  async function handleProjectFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || !filesDialogProject) return;
+
+    setUploadingFile(true);
+    setUploadProgress("Enviando arquivo...");
+
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const fileExt = file.name.split(".").pop();
+      const uniqueId = Math.random().toString(36).substring(2, 11);
+      const storagePath = `${user?.id}/${filesDialogProject.id}/${uniqueId}.${fileExt}`;
+
+      // 1. Upload directly to storage bucket 'document-assets'
+      const { error: uploadError } = await supabase.storage
+        .from("document-assets")
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          upsert: true,
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      setUploadProgress("Processando extração de texto...");
+
+      // 2. Trigger the process API
+      const res = await fetch(`/api/projects/${filesDialogProject.id}/process`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          storagePath,
+          fileName: file.name,
+          mimeType: file.type,
+          size: file.size,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Erro no processamento RAG.");
+      }
+
+      setUploadProgress("Pronto!");
+      await loadProjectFiles(filesDialogProject.id);
+    } catch (err) {
+      console.error("Erro no upload do RAG:", err);
+      alert(err instanceof Error ? err.message : "Erro ao carregar e processar arquivo.");
+    } finally {
+      setUploadingFile(false);
+      setUploadProgress("");
+      if (event.target) {
+        event.target.value = "";
+      }
+    }
+  }
+
+  async function deleteProjectFile(fileId: string) {
+    if (!filesDialogProject) return;
+    const confirmed = window.confirm("Tem certeza que deseja remover este catálogo do projeto? Os dados associados serão removidos do chat.");
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/projects/${filesDialogProject.id}/files?fileId=${fileId}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        throw new Error("Erro ao excluir arquivo.");
+      }
+
+      await loadProjectFiles(filesDialogProject.id);
+    } catch (err) {
+      console.error("Erro ao deletar arquivo:", err);
+      alert("Erro ao excluir arquivo.");
+    }
+  }
+
   function newConversation() {
     resetConversationDraft();
   }
@@ -1097,6 +1232,10 @@ export function TruqpediaShell({
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openProjectFilesDialog(project)}>
+                              <File className="size-4 mr-2" />
+                              Arquivos
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => renameProject(project)}>
                               <Pencil />
                               Renomear
@@ -1556,6 +1695,13 @@ export function TruqpediaShell({
             }
           }}
         />
+        {artifactOpen ? (
+          <button
+            aria-label="Fechar documento"
+            className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+            onClick={() => setArtifactOpen(false)}
+          />
+        ) : null}
         <ArtifactPanel
           artifact={activeArtifact}
           artifacts={artifacts}
@@ -1567,868 +1713,63 @@ export function TruqpediaShell({
           onUpdate={updateArtifact}
           open={artifactOpen}
         />
+        <ProjectFilesDialog
+          open={isFilesDialogOpen}
+          onOpenChange={setIsFilesDialogOpen}
+          project={filesDialogProject}
+          files={projectFiles}
+          loading={loadingFiles}
+          uploading={uploadingFile}
+          uploadProgress={uploadProgress}
+          onUpload={handleProjectFileUpload}
+          onDelete={deleteProjectFile}
+        />
       </div>
     </TooltipProvider>
   );
 }
 
-function ConversationRenameDialog({
-  conversation,
-  onOpenChange,
-  onSubmit,
-  onTitleChange,
-  saving,
-  title,
-}: {
-  conversation: UiConversation | null;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
-  onTitleChange: (title: string) => void;
-  saving: boolean;
-  title: string;
-}) {
+function isServerParsable(file: File) {
+  const name = file.name.toLowerCase();
   return (
-    <Dialog open={Boolean(conversation)} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Renomear conversa</DialogTitle>
-          <DialogDescription>
-            Dê um nome curto para encontrar este atendimento mais rápido depois.
-          </DialogDescription>
-        </DialogHeader>
-
-        <form className="space-y-4" onSubmit={onSubmit}>
-          <div className="space-y-2">
-            <Label htmlFor="conversation-title">Nome da conversa</Label>
-            <Input
-              id="conversation-title"
-              autoFocus
-              maxLength={120}
-              placeholder="Ex: Volvo FH - embreagem Sachs"
-              value={title}
-              onChange={(event) => onTitleChange(event.target.value)}
-              required
-            />
-          </div>
-
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button
-              className="w-full sm:w-auto"
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              disabled={!title.trim() || saving}
-            >
-              <Pencil className="size-4" />
-              {saving ? "Salvando..." : "Salvar nome"}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ConversationDeleteDialog({
-  conversation,
-  deleting,
-  onConfirm,
-  onOpenChange,
-}: {
-  conversation: UiConversation | null;
-  deleting: boolean;
-  onConfirm: () => void;
-  onOpenChange: (open: boolean) => void;
-}) {
-  return (
-    <Dialog open={Boolean(conversation)} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Excluir conversa</DialogTitle>
-          <DialogDescription>
-            Esta ação remove o chat e suas mensagens salvas. Não dá para
-            desfazer.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="rounded-md border border-border bg-muted/70 p-3 text-sm">
-          <div className="font-medium text-foreground">
-            {conversation?.title ?? "Conversa"}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {conversation ? relativeTime(conversation.updatedAt) : null}
-          </div>
-        </div>
-
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button
-            className="w-full sm:w-auto"
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancelar
-          </Button>
-          <Button
-            className="w-full sm:w-auto"
-            type="button"
-            variant="destructive"
-            disabled={deleting}
-            onClick={onConfirm}
-          >
-            <Trash2 className="size-4" />
-            {deleting ? "Excluindo..." : "Excluir conversa"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ArtifactPanel({
-  artifact,
-  artifacts,
-  onClose,
-  onCopy,
-  onDownload,
-  onDuplicate,
-  onSelect,
-  onUpdate,
-  open,
-}: {
-  artifact: UiArtifact | null;
-  artifacts: UiArtifact[];
-  onClose: () => void;
-  onCopy: (content: string) => void;
-  onDownload: (artifact: UiArtifact) => void;
-  onDuplicate: (artifact: UiArtifact) => void;
-  onSelect: (artifactId: string) => void;
-  onUpdate: (
-    artifactId: string,
-    patch: Pick<UiArtifact, "title" | "content">,
-  ) => void;
-  open: boolean;
-}) {
-  const [mode, setMode] = useState<"preview" | "edit">("preview");
-  const [draftTitle, setDraftTitle] = useState("");
-  const [draftContent, setDraftContent] = useState("");
-
-  useEffect(() => {
-    setDraftTitle(artifact?.title ?? "");
-    setDraftContent(artifact?.content ?? "");
-    setMode("preview");
-  }, [artifact?.id, artifact?.title, artifact?.content]);
-
-  if (!open) {
-    return null;
-  }
-
-  const dirty =
-    Boolean(artifact) &&
-    (draftTitle !== artifact?.title || draftContent !== artifact?.content);
-
-  return (
-    <div className="soft-enter fixed inset-x-0 bottom-0 z-50 flex h-[92dvh] max-h-[calc(100dvh-0.5rem)] w-full flex-col rounded-t-lg border border-border bg-background shadow-2xl md:inset-y-0 md:left-auto md:right-0 md:h-auto md:w-[min(520px,44vw)] md:rounded-none md:border-y-0 md:border-l lg:w-[560px]">
-      <div className="flex min-h-16 items-center justify-between gap-3 border-b border-border px-3 py-2 sm:px-4">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">Documento</div>
-          <div className="truncate text-xs text-muted-foreground">
-            Edite, versione e baixe respostas salvas
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {artifact ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => onDuplicate(artifact)}
-                >
-                  <Copy />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Duplicar versão</TooltipContent>
-            </Tooltip>
-          ) : null}
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X />
-          </Button>
-        </div>
-      </div>
-
-      {artifacts.length > 1 ? (
-        <div className="border-b border-border p-3">
-          <select
-            className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-            value={artifact?.id ?? ""}
-            onChange={(event) => onSelect(event.target.value)}
-          >
-            {artifacts.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : null}
-
-      {artifact ? (
-        <>
-          <div className="border-b border-border p-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0 flex-1">
-                {mode === "edit" ? (
-                  <input
-                    className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm font-medium outline-none focus:ring-2 focus:ring-ring"
-                    value={draftTitle}
-                    onChange={(event) => setDraftTitle(event.target.value)}
-                    aria-label="Título do documento"
-                  />
-                ) : (
-                  <div className="truncate text-sm font-medium">
-                    {artifact.title}
-                  </div>
-                )}
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {new Date(artifact.createdAt).toLocaleString("pt-BR")}
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => onCopy(draftContent || artifact.content)}
-                    >
-                      <Copy />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Copiar</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() =>
-                        onDownload({
-                          ...artifact,
-                          title: draftTitle || artifact.title,
-                          content: draftContent || artifact.content,
-                        })
-                      }
-                    >
-                      <Download />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Baixar Markdown</TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-              <div className="inline-flex rounded-md border border-border bg-muted p-1">
-                <button
-                  type="button"
-                  className={cn(
-                    "h-8 rounded px-3 text-xs font-medium transition-colors",
-                    mode === "preview"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground",
-                  )}
-                  onClick={() => setMode("preview")}
-                >
-                  Visualizar
-                </button>
-                <button
-                  type="button"
-                  className={cn(
-                    "h-8 rounded px-3 text-xs font-medium transition-colors",
-                    mode === "edit"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground",
-                  )}
-                  onClick={() => setMode("edit")}
-                >
-                  Editar
-                </button>
-              </div>
-              <Button
-                className="w-full sm:w-auto"
-                size="sm"
-                disabled={!dirty || !draftTitle.trim() || !draftContent.trim()}
-                onClick={() => {
-                  if (!artifact) {
-                    return;
-                  }
-
-                  onUpdate(artifact.id, {
-                    title: draftTitle.trim(),
-                    content: draftContent.trim(),
-                  });
-                  setMode("preview");
-                }}
-              >
-                <Save className="size-3.5" />
-                Salvar
-              </Button>
-            </div>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
-            {mode === "edit" ? (
-              <Textarea
-                value={draftContent}
-                onChange={(event) => setDraftContent(event.target.value)}
-                className="h-full min-h-[52dvh] resize-none bg-input-shell text-sm leading-6"
-                aria-label="Conteúdo do documento"
-              />
-            ) : (
-              <div className="rounded-md border border-border bg-app p-3 sm:p-4">
-                <MarkdownMessage content={draftContent || artifact.content} />
-              </div>
-            )}
-          </div>
-
-          <div className="border-t border-border px-4 py-3 text-xs leading-5 text-muted-foreground">
-            <div className="flex gap-2">
-              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
-              <span>
-                Para proposta, compra ou segurança, confirme aplicação por
-                catálogo, chassi ou fabricante antes de publicar.
-              </span>
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="flex flex-1 flex-col justify-center p-6 text-sm text-muted-foreground">
-          <div className="grid size-10 place-items-center rounded-md bg-muted text-foreground">
-            <FileText className="size-5" />
-          </div>
-          <div className="mt-4 text-base font-semibold text-foreground">
-            Nenhum documento aberto
-          </div>
-          <p className="mt-2 max-w-sm leading-6">
-            Use o botão Documento em uma resposta da IA para criar um arquivo
-            editável, comparar versões e baixar em Markdown.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProjectCreateDialog({
-  description,
-  name,
-  onDescriptionChange,
-  onNameChange,
-  onOpenChange,
-  onSubmit,
-  open,
-  saving,
-}: {
-  description: string;
-  name: string;
-  onDescriptionChange: (value: string) => void;
-  onNameChange: (value: string) => void;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  open: boolean;
-  saving: boolean;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Novo projeto</DialogTitle>
-          <DialogDescription>
-            Organize conversas por cliente, frota, catálogo ou orçamento para
-            manter o contexto técnico junto.
-          </DialogDescription>
-        </DialogHeader>
-
-        <form className="space-y-4" onSubmit={onSubmit}>
-          <div className="space-y-2">
-            <Label htmlFor="project-name">Nome do projeto</Label>
-            <Input
-              id="project-name"
-              autoFocus
-              maxLength={120}
-              placeholder="Ex: Frota Volvo VM 270 - Cliente Almeida"
-              value={name}
-              onChange={(event) => onNameChange(event.target.value)}
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="project-description">Descrição opcional</Label>
-            <Textarea
-              id="project-description"
-              maxLength={280}
-              placeholder="Ex: Conversas sobre filtros, freio e suspensão da frota 2024."
-              value={description}
-              onChange={(event) => onDescriptionChange(event.target.value)}
-              className="min-h-24 resize-none bg-input-shell"
-            />
-          </div>
-
-          <div className="grid gap-2 rounded-md border border-border bg-muted/60 p-3 text-xs leading-5 text-muted-foreground sm:grid-cols-3">
-            <span>Cliente</span>
-            <span>Frota</span>
-            <span>Catálogo</span>
-          </div>
-
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button
-              className="w-full sm:w-auto"
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancelar
-            </Button>
-            <Button className="w-full sm:w-auto" disabled={!name.trim() || saving}>
-              <FolderPlus className="size-4" />
-              {saving ? "Criando..." : "Criar projeto"}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ProjectSettingsDialog({
-  deletingAllChats,
-  onDeleteAllConversations,
-  onOpenChange,
-  onPreferencesChange,
-  onSavePreferences,
-  open,
-  preferences,
-  preferencesSaving,
-  status,
-  user,
-}: {
-  deletingAllChats: boolean;
-  onDeleteAllConversations: () => void;
-  onOpenChange: (open: boolean) => void;
-  onPreferencesChange: (preferences: AssistantPreferences) => void;
-  onSavePreferences: () => void;
-  open: boolean;
-  preferences: AssistantPreferences;
-  preferencesSaving: boolean;
-  status: string | null;
-  user: SessionUser | null;
-}) {
-  function updatePreference<Key extends keyof AssistantPreferences>(
-    key: Key,
-    value: AssistantPreferences[Key],
-  ) {
-    onPreferencesChange({ ...preferences, [key]: value });
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Configurações</DialogTitle>
-          <DialogDescription>
-            Personalize a conversa e gerencie sua conta.
-          </DialogDescription>
-        </DialogHeader>
-
-        <Tabs defaultValue="preferencias" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="preferencias">IA</TabsTrigger>
-            <TabsTrigger value="conta">Conta</TabsTrigger>
-            <TabsTrigger value="plano">Plano</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="preferencias" className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <PreferenceField label="Como te chamar">
-                <Input
-                  value={preferences.displayName ?? ""}
-                  placeholder="Ex.: Ramon"
-                  onChange={(event) =>
-                    updatePreference("displayName", event.target.value)
-                  }
-                />
-              </PreferenceField>
-
-              <PreferenceField label="Como se referir a você">
-                <Input
-                  value={preferences.referenceStyle ?? ""}
-                  placeholder="Ex.: pelo primeiro nome, de forma direta"
-                  onChange={(event) =>
-                    updatePreference("referenceStyle", event.target.value)
-                  }
-                />
-              </PreferenceField>
-
-              <PreferenceField label="Estilo de resposta">
-                <select
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  value={preferences.responseStyle ?? ""}
-                  onChange={(event) =>
-                    updatePreference("responseStyle", event.target.value)
-                  }
-                >
-                  <option value="">Equilibrado</option>
-                  <option value="Direto, curto e com próximos passos claros.">
-                    Direto
-                  </option>
-                  <option value="Detalhado, didático e com checklist.">
-                    Detalhado
-                  </option>
-                  <option value="Mais comercial, pronto para WhatsApp e venda.">
-                    Comercial
-                  </option>
-                  <option value="Mais técnico, com cautelas e validações.">
-                    Técnico
-                  </option>
-                </select>
-              </PreferenceField>
-
-              <PreferenceField label="Contexto da sua operação">
-                <Input
-                  value={preferences.businessContext ?? ""}
-                  placeholder="Ex.: loja de peças diesel, balcão e e-commerce"
-                  onChange={(event) =>
-                    updatePreference("businessContext", event.target.value)
-                  }
-                />
-              </PreferenceField>
-            </div>
-
-            <PreferenceField label="Como você quer que ele aja">
-              <Textarea
-                value={preferences.behavior ?? ""}
-                placeholder="Ex.: seja direto, faça perguntas quando faltar dado e me entregue mensagem pronta para cliente."
-                className="min-h-24 resize-none bg-input-shell"
-                onChange={(event) =>
-                  updatePreference("behavior", event.target.value)
-                }
-              />
-            </PreferenceField>
-
-            <PreferenceField label="Preferências adicionais">
-              <Textarea
-                value={preferences.customInstructions ?? ""}
-                placeholder="Ex.: priorize linguagem simples para equipe do balcão e destaque riscos de aplicação."
-                className="min-h-20 resize-none bg-input-shell"
-                onChange={(event) =>
-                  updatePreference("customInstructions", event.target.value)
-                }
-              />
-            </PreferenceField>
-
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs leading-5 text-muted-foreground">
-                Essas preferências personalizam a conversa, mas não removem a
-                cautela técnica do Truqpedia.
-              </p>
-              <Button
-                className="w-full sm:w-auto"
-                disabled={preferencesSaving}
-                onClick={onSavePreferences}
-              >
-                <Save className="size-4" />
-                {preferencesSaving ? "Salvando..." : "Salvar preferências"}
-              </Button>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="conta" className="space-y-4">
-            <div className="rounded-md border border-border p-4">
-              <div className="text-sm font-medium">Conta</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {user?.email ?? "Visitante"}
-              </div>
-            </div>
-
-            <div className="rounded-md border border-border p-4">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <ShieldCheck className="size-4 text-primary" />
-                Histórico e privacidade operacional
-              </div>
-              <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                Projetos e conversas ficam vinculados à sua conta para manter
-                clientes, frotas e orçamentos organizados.
-              </div>
-            </div>
-
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
-              <div className="text-sm font-medium">Apagar histórico de chat</div>
-              <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                Remove todas as conversas e mensagens salvas da sua conta. Seus
-                projetos continuam existindo, mas ficam sem conversas vinculadas.
-              </div>
-              <Button
-                className="mt-4 w-full sm:w-auto"
-                variant="destructive"
-                disabled={!user || deletingAllChats}
-                onClick={onDeleteAllConversations}
-              >
-                <Trash2 className="size-4" />
-                {deletingAllChats ? "Apagando..." : "Apagar todos os chats"}
-              </Button>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="plano" className="space-y-4">
-            <div className="rounded-md border border-border p-4">
-              <div className="text-sm font-medium">Plano atual</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                Comece pelo plano Loja para projetos, documentos e histórico
-                completo.
-              </div>
-              <Button className="mt-4 w-full sm:w-auto" asChild>
-                <Link href="/checkout?plan=loja">
-                  Ver planos e checkout
-                  <ArrowRight />
-                </Link>
-              </Button>
-            </div>
-          </TabsContent>
-        </Tabs>
-
-        {status ? (
-          <div className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
-            {status}
-          </div>
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function PreferenceField({
-  children,
-  label,
-}: {
-  children: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <label className="grid gap-2 text-sm font-medium">
-      {label}
-      {children}
-    </label>
-  );
-}
-
-function MessageBubble({
-  message,
-  onCopy,
-  onOpenArtifact,
-  onRegenerate,
-}: {
-  message: UiMessage;
-  onCopy?: () => void;
-  onOpenArtifact?: () => void;
-  onRegenerate?: () => void;
-}) {
-  const isUser = message.role === "user";
-
-  return (
-    <div
-      className={cn(
-        "soft-enter flex gap-2 font-sans sm:gap-3",
-        isUser && "justify-end",
-      )}
-    >
-      {!isUser ? (
-        <div className="mt-1 hidden size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground min-[420px]:grid">
-          <Bot className="size-4" />
-        </div>
-      ) : null}
-      <div
-        className={cn(
-          "min-w-0 max-w-full rounded-lg px-3 py-3 text-sm shadow-sm min-[420px]:max-w-[calc(100%-2.5rem)] sm:max-w-[86%] sm:px-4",
-          isUser
-            ? "bg-user-message text-user-message-foreground"
-            : "border border-border bg-background text-foreground",
-          message.status === "error" && "border-destructive text-destructive",
-        )}
-      >
-        {message.content ? (
-          isUser ? (
-            <div className="whitespace-pre-wrap leading-6">{message.content}</div>
-          ) : (
-            <div className="relative">
-              <MarkdownMessage content={message.content} />
-              {message.status === "streaming" ? (
-                <span className="typing-caret ml-1 inline-block h-4 w-px translate-y-0.5 bg-foreground" />
-              ) : null}
-            </div>
-          )
-        ) : message.status === "searching" ? (
-          <ActivityTimeline activities={message.activities ?? []} />
-        ) : (
-          <TypingIndicator />
-        )}
-
-        {isUser && message.attachments?.length ? (
-          <div className="mt-3 flex flex-wrap gap-2 border-t border-white/15 pt-3">
-            {message.attachments.map((attachment, index) => (
-              <span
-                key={`${attachment.name}-${index}`}
-                className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-white/10 px-2 py-1 text-xs"
-              >
-                {attachment.text ? (
-                  <FileText className="size-3.5 shrink-0" />
-                ) : (
-                  <File className="size-3.5 shrink-0" />
-                )}
-                <span className="truncate">{attachment.name}</span>
-              </span>
-            ))}
-          </div>
-        ) : null}
-
-        {!isUser && message.sources?.length ? (
-          <SourceCards sources={message.sources} />
-        ) : null}
-
-        {!isUser && message.content ? (
-          <div
-            className="mt-3 flex flex-wrap gap-1 border-t border-border pt-2"
-          >
-            {onCopy ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 px-1.5 text-[11px]"
-                onClick={onCopy}
-              >
-                <Copy className="size-3" />
-                Copiar
-              </Button>
-            ) : null}
-            {onOpenArtifact ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 px-1.5 text-[11px]"
-                onClick={onOpenArtifact}
-              >
-                <FileText className="size-3" />
-                Documento
-              </Button>
-            ) : null}
-            {onRegenerate ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 px-1.5 text-[11px]"
-                onClick={onRegenerate}
-              >
-                <RotateCcw className="size-3" />
-                Refazer
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-      {isUser ? (
-        <div className="mt-1 hidden size-8 shrink-0 place-items-center rounded-md bg-muted min-[420px]:grid">
-          <UserRound className="size-4" />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ActivityTimeline({
-  activities,
-}: {
-  activities: Array<{ label: string; detail?: string }>;
-}) {
-  if (activities.length === 0) {
-    return <TypingIndicator />;
-  }
-
-  return (
-    <div className="space-y-2 rounded-md border border-border bg-muted/70 p-3 text-sm">
-      {activities.slice(-4).map((activity, index) => {
-        const active = index === activities.slice(-4).length - 1;
-
-        return (
-          <div key={`${activity.label}-${index}`} className="flex gap-2">
-            <span
-              className={cn(
-                "mt-1 grid size-4 shrink-0 place-items-center rounded-full border border-border bg-background",
-                active && "border-primary",
-              )}
-            >
-              <span
-                className={cn(
-                  "size-1.5 rounded-full bg-muted-foreground",
-                  active && "animate-pulse bg-primary",
-                )}
-              />
-            </span>
-            <span className="min-w-0">
-              <span className="block font-medium text-foreground">
-                {activity.label}
-              </span>
-              {activity.detail ? (
-                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                  {activity.detail}
-                </span>
-              ) : null}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function SourceCards({ sources }: { sources: SourceResult[] }) {
-  return (
-    <details className="mt-3 border-t border-border pt-2 text-xs text-muted-foreground">
-      <summary className="cursor-pointer select-none list-none">
-        <span className="inline-flex items-center gap-1.5 rounded bg-muted px-2 py-1">
-          <ExternalLink className="size-3" />
-          Fontes ({Math.min(sources.length, 4)})
-        </span>
-      </summary>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {sources.slice(0, 4).map((source, index) => (
-          <a
-            key={`${source.url}-${index}`}
-            href={source.url}
-            target="_blank"
-            rel="noreferrer"
-            className="max-w-full truncate rounded border border-border bg-muted/50 px-2 py-1 hover:bg-muted hover:text-foreground"
-            title={source.title || source.url}
-          >
-            [{index + 1}] {source.title || source.url}
-          </a>
-        ))}
-      </div>
-    </details>
+    file.type === "application/pdf" ||
+    name.endsWith(".pdf") ||
+    file.type.includes("excel") ||
+    file.type.includes("spreadsheetml") ||
+    name.endsWith(".xlsx") ||
+    name.endsWith(".xls")
   );
 }
 
 async function readAttachment(file: File): Promise<UploadedAttachment> {
-  const canReadText = isReadableText(file);
   const maxChars = 60000;
+
+  if (isServerParsable(file)) {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/attachments/parse", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Erro na resposta do parser");
+      }
+
+      const result = (await response.json()) as UploadedAttachment;
+      return result;
+    } catch (err) {
+      console.error("Falha ao extrair texto do anexo:", err);
+      return {
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+      };
+    }
+  }
+
+  const canReadText = isReadableText(file);
 
   if (!canReadText) {
     return {

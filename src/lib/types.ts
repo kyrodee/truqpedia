@@ -102,6 +102,8 @@ export type ProviderRuntimeConfig = {
   priority: number;
   speedModel: string;
   deepModel: string;
+  speedModelFallbacks?: string[];
+  deepModelFallbacks?: string[];
   baseUrl?: string;
   timeoutMs: number;
 };

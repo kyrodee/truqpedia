@@ -1,6 +1,6 @@
 import {
-  DEFAULT_CHAT_MODE,
   DEFAULT_DEEP_MODEL,
+  DEFAULT_DEEP_MODEL_FALLBACKS,
   DEFAULT_SPEED_MODEL,
   SYSTEM_PROMPT,
 } from "@/lib/constants";
@@ -31,6 +31,7 @@ const DEFAULT_PROVIDER_CONFIGS: ProviderRuntimeConfig[] = [
     priority: 10,
     speedModel: DEFAULT_SPEED_MODEL.groq,
     deepModel: DEFAULT_DEEP_MODEL.groq,
+    deepModelFallbacks: [...DEFAULT_DEEP_MODEL_FALLBACKS.groq],
     timeoutMs: 20000,
   },
   {
@@ -97,7 +98,9 @@ export async function loadProviderConfigs(): Promise<ProviderRuntimeConfig[]> {
       deep_model: string;
       base_url: string | null;
       timeout_ms: number;
+      metadata?: unknown;
     };
+    const metadata = readProviderMetadata(typed.metadata);
 
     return {
       id: typed.id,
@@ -106,6 +109,8 @@ export async function loadProviderConfigs(): Promise<ProviderRuntimeConfig[]> {
       priority: typed.priority,
       speedModel: typed.speed_model,
       deepModel: typed.deep_model,
+      speedModelFallbacks: metadata.speedModelFallbacks,
+      deepModelFallbacks: metadata.deepModelFallbacks,
       baseUrl: typed.base_url ?? undefined,
       timeoutMs: typed.timeout_ms,
     };
@@ -345,63 +350,69 @@ export async function* streamWithFallback(input: {
       continue;
     }
 
-    const startedAt = Date.now();
-    const effectiveMode = DEFAULT_CHAT_MODE;
-    let model = config.deepModel;
-    let assembled = "";
-    let emittedAnyToken = false;
+    const effectiveMode = input.mode;
+    const modelCandidates = getModelCandidates(config, effectiveMode);
 
-    try {
-      const result = await provider.stream({
-        mode: effectiveMode,
-        messages: input.messages,
-        sources: input.sources,
-        config,
-        abortSignal: input.abortSignal,
-      });
+    for (const modelCandidate of modelCandidates) {
+      const startedAt = Date.now();
+      const attemptConfig =
+        effectiveMode === "speed"
+          ? { ...config, speedModel: modelCandidate }
+          : { ...config, deepModel: modelCandidate };
+      let assembled = "";
+      let emittedAnyToken = false;
 
-      model = result.model;
-      yield { type: "provider", provider: result.providerId, model };
+      try {
+        const result = await provider.stream({
+          mode: effectiveMode,
+          messages: input.messages,
+          sources: input.sources,
+          config: attemptConfig,
+          abortSignal: input.abortSignal,
+        });
 
-      for await (const token of result.tokens) {
-        emittedAnyToken = true;
-        assembled += token;
-        yield { type: "token", token };
-      }
+        yield { type: "provider", provider: result.providerId, model: result.model };
 
-      await recordProviderMetric({
-        providerId: provider.id,
-        model,
-        mode: effectiveMode,
-        latencyMs: Date.now() - startedAt,
-        success: true,
-        userId: input.userId,
-        conversationId: input.conversationId,
-        tokensIn: estimateTokens(input.messages.map((message) => message.content).join(" ")),
-        tokensOut: estimateTokens(assembled),
-      });
+        for await (const token of result.tokens) {
+          emittedAnyToken = true;
+          assembled += token;
+          yield { type: "token", token };
+        }
 
-      return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      const retryable =
-        error instanceof ProviderError ? error.retryable : !emittedAnyToken;
+        await recordProviderMetric({
+          providerId: provider.id,
+          model: result.model,
+          mode: effectiveMode,
+          latencyMs: Date.now() - startedAt,
+          success: true,
+          userId: input.userId,
+          conversationId: input.conversationId,
+          tokensIn: estimateTokens(input.messages.map((message) => message.content).join(" ")),
+          tokensOut: estimateTokens(assembled),
+        });
 
-      errors.push(`${provider.displayName}: ${message}`);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        const retryable =
+          error instanceof ProviderError ? error.retryable : !emittedAnyToken;
 
-      await recordProviderMetric({
-        providerId: provider.id,
-        model,
-        mode: effectiveMode,
-        latencyMs: Date.now() - startedAt,
-        success: false,
-        errorMessage: message,
-        userId: input.userId,
-        conversationId: input.conversationId,
-      });
+        errors.push(`${provider.displayName} (${modelCandidate}): ${message}`);
 
-      if (!retryable || emittedAnyToken) {
-        throw error;
+        await recordProviderMetric({
+          providerId: provider.id,
+          model: modelCandidate,
+          mode: effectiveMode,
+          latencyMs: Date.now() - startedAt,
+          success: false,
+          errorMessage: message,
+          userId: input.userId,
+          conversationId: input.conversationId,
+        });
+
+        if (!retryable || emittedAnyToken) {
+          throw error;
+        }
       }
     }
   }
@@ -429,4 +440,55 @@ export async function* streamWithFallback(input: {
 
 function estimateTokens(text: string) {
   return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function getModelCandidates(config: ProviderRuntimeConfig, mode: ChatMode) {
+  const primary = mode === "speed" ? config.speedModel : config.deepModel;
+  const fallbacks =
+    mode === "speed" ? config.speedModelFallbacks : config.deepModelFallbacks;
+
+  return uniqueModels([primary, ...(fallbacks ?? [])]);
+}
+
+function uniqueModels(models: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const model of models) {
+    const clean = model.trim();
+    const key = clean.toLowerCase();
+
+    if (!clean || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(clean);
+  }
+
+  return result;
+}
+
+function readProviderMetadata(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return {};
+  }
+
+  const value = metadata as {
+    speed_model_fallbacks?: unknown;
+    deep_model_fallbacks?: unknown;
+  };
+
+  return {
+    speedModelFallbacks: readStringArray(value.speed_model_fallbacks),
+    deepModelFallbacks: readStringArray(value.deep_model_fallbacks),
+  };
+}
+
+function readStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.filter((item): item is string => typeof item === "string");
 }

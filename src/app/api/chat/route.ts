@@ -33,6 +33,7 @@ import type {
 } from "@/lib/types";
 import { recordUsageLog } from "@/lib/usage/metrics";
 import { toSse, truncate } from "@/lib/utils";
+import { generateGeminiEmbeddings } from "@/lib/ai/rag-worker";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -354,6 +355,62 @@ export async function POST(request: NextRequest) {
               label: responseActivityLabel,
               detail: searchDecision.reason,
             });
+          }
+        }
+
+        // RAG Search over Project Knowledge Collection
+        if (user && supabase && body.projectId) {
+          try {
+            send({
+              type: "activity",
+              label: "Consultando base de conhecimento do projeto...",
+            });
+
+            const embeddings = await generateGeminiEmbeddings([body.message]);
+            const queryEmbedding = embeddings[0];
+
+            if (queryEmbedding) {
+              /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+              const { data: chunks, error: matchError } = await (supabase as any).rpc(
+                "match_knowledge_chunks",
+                {
+                  query_embedding: queryEmbedding,
+                  match_threshold: 0.35,
+                  match_count: 8,
+                  filter_collection_id: body.projectId,
+                  query_text: body.message,
+                }
+              );
+
+              if (matchError) {
+                logError("chat.rag.match_failed", matchError);
+              } else if (chunks && chunks.length > 0) {
+                const ragSources: SourceResult[] = (chunks as Array<{
+                  content: string;
+                  document_id: string;
+                  metadata?: { file_name?: string; chunk_index?: number };
+                }>).map((chunk) => ({
+                  title: `${chunk.metadata?.file_name ?? "Documento"} (Ref #${(chunk.metadata?.chunk_index ?? 0) + 1})`,
+                  url: `file:///projects/${body.projectId}/files/${chunk.document_id}`,
+                  snippet: chunk.content,
+                  provider: "project_rag",
+                }));
+
+                sources = [...sources, ...ragSources];
+
+                send({
+                  type: "activity",
+                  label: `Encontrei ${ragSources.length} referências no projeto`,
+                });
+              } else {
+                send({
+                  type: "activity",
+                  label: "Nenhuma referência encontrada no projeto",
+                });
+              }
+            }
+          } catch (ragError) {
+            logError("chat.rag.failed", ragError);
           }
         }
 
