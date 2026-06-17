@@ -9,6 +9,7 @@ import {
   LogIn,
   ReceiptText,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { BillingPlan } from "@/lib/billing/plans";
@@ -16,11 +17,16 @@ import type { BillingPlan } from "@/lib/billing/plans";
 type CheckoutPageProps = {
   plan: BillingPlan;
   userEmail?: string | null;
+  subscription?: { planId: string; status: string; createdAt: string } | null;
+  successParam?: string;
 };
 
-export function CheckoutPage({ plan, userEmail }: CheckoutPageProps) {
+export function CheckoutPage({ plan, userEmail, subscription, successParam }: CheckoutPageProps) {
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const isSubscribed = subscription?.status === "active";
+  const activePlanId = subscription?.planId;
 
   async function startCheckout() {
     setStatus(null);
@@ -60,7 +66,7 @@ export function CheckoutPage({ plan, userEmail }: CheckoutPageProps) {
   }
 
   return (
-    <main className="min-h-dvh bg-app text-foreground">
+    <main className="min-h-dvh bg-app text-foreground font-sans">
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         <Link
           href="/"
@@ -70,7 +76,37 @@ export function CheckoutPage({ plan, userEmail }: CheckoutPageProps) {
           Voltar
         </Link>
 
-        <div className="mt-6 grid items-start gap-4 lg:mt-8 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+        {/* Payment Success/Failure Banners */}
+        <div className="mt-6">
+          {successParam === "true" && (
+            <div className="rounded-lg border border-green-500/20 bg-green-500/10 p-4 text-green-600 text-sm leading-6 flex items-start gap-3 shadow-sm soft-enter">
+              <CheckCircle2 className="size-5 shrink-0 mt-0.5 text-green-500" />
+              <div>
+                <h4 className="font-bold text-foreground inline-flex items-center gap-1.5">
+                  <Sparkles className="size-4 text-amber-500 animate-pulse" />
+                  Assinatura Ativada com Sucesso!
+                </h4>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Seu pagamento foi aprovado e sua conta foi atualizada. Você já tem acesso total aos recursos do seu plano contratado no chat técnico.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {successParam === "false" && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-destructive text-sm leading-6 flex items-start gap-3 shadow-sm soft-enter">
+              <ShieldCheck className="size-5 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-foreground">Pagamento cancelado ou recusado</h4>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Não foi possível concluir a contratação. Caso ache que foi um erro ou o valor tenha sido debitado, por favor entre em contato com nosso suporte técnico.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 grid items-start gap-4 lg:mt-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
           <section className="min-w-0 rounded-md border border-border bg-background p-4 shadow-sm sm:p-6">
             <div className="inline-flex items-center gap-2 rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
               <CreditCard className="size-4 text-primary" />
@@ -166,7 +202,23 @@ export function CheckoutPage({ plan, userEmail }: CheckoutPageProps) {
               Conta: {userEmail ?? "entre para continuar o checkout"}
             </div>
 
-            {userEmail ? (
+            {isSubscribed ? (
+              <div className="mt-5 rounded-md border border-green-500/20 bg-green-500/5 p-3 text-xs text-green-600 flex gap-2">
+                <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-green-500" />
+                <div>
+                  <span className="font-semibold block text-foreground">Assinatura Ativa</span>
+                  Plano contratado: {activePlanId === "balcao" ? "Balcão" : activePlanId === "loja" ? "Loja" : "Operação"}
+                </div>
+              </div>
+            ) : null}
+
+            {isSubscribed ? (
+              <Button className="mt-4 w-full" asChild>
+                <Link href="/chat">
+                  Ir para o Workspace (Chat)
+                </Link>
+              </Button>
+            ) : userEmail ? (
               <Button
                 className="mt-4 w-full"
                 disabled={loading}

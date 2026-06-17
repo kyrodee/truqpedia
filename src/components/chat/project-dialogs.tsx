@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { getBillingPlan } from "@/lib/billing/plans";
 import type { AssistantPreferences } from "@/lib/types";
 import type { SessionUser } from "./types";
 
@@ -111,6 +112,7 @@ type ProjectSettingsDialogProps = {
   preferencesSaving: boolean;
   status: string | null;
   user: SessionUser | null;
+  subscription?: { planId: string; status: string; createdAt: string } | null;
 };
 
 export function ProjectSettingsDialog({
@@ -124,6 +126,7 @@ export function ProjectSettingsDialog({
   preferencesSaving,
   status,
   user,
+  subscription,
 }: ProjectSettingsDialogProps) {
   function updatePreference<Key extends keyof AssistantPreferences>(
     key: Key,
@@ -282,19 +285,45 @@ export function ProjectSettingsDialog({
           </TabsContent>
 
           <TabsContent value="plano" className="space-y-4">
-            <div className="rounded-md border border-border p-4">
-              <div className="text-sm font-medium">Plano atual</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                Comece pelo plano Loja para projetos, documentos e histórico
-                completo.
+            {subscription?.status === "active" ? (
+              <div className="rounded-md border border-green-500/20 bg-green-500/5 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-green-600">
+                  <ShieldCheck className="size-5 text-green-500" />
+                  Assinatura Ativa
+                </div>
+                <div className="space-y-1">
+                  <div className="text-sm font-medium text-foreground">
+                    Plano {getBillingPlan(subscription.planId).name}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Status: <span className="text-green-600 font-medium">Ativo</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Contratado em: {new Date(subscription.createdAt).toLocaleDateString("pt-BR")}
+                  </p>
+                </div>
+                <div className="pt-2 border-t border-border flex gap-2">
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/checkout">
+                      Ver outros planos
+                    </Link>
+                  </Button>
+                </div>
               </div>
-              <Button className="mt-4 w-full sm:w-auto" asChild>
-                <Link href="/checkout?plan=loja">
-                  Ver planos e checkout
-                  <ArrowRight />
-                </Link>
-              </Button>
-            </div>
+            ) : (
+              <div className="rounded-md border border-border p-4">
+                <div className="text-sm font-medium">Plano atual: Gratuito</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Comece pelo plano Loja para projetos, documentos e histórico completo.
+                </div>
+                <Button className="mt-4 w-full sm:w-auto" asChild>
+                  <Link href="/checkout?plan=loja">
+                    Ver planos e checkout
+                    <ArrowRight />
+                  </Link>
+                </Button>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
 

@@ -33,28 +33,28 @@ export default async function ChatPage({ searchParams }: PageProps) {
     { data: collections },
     { data: userSettings },
   ] = await Promise.all([
-      supabase
-        .from("user_profiles")
-        .select("role")
-        .eq("id", user.id)
-        .maybeSingle(),
-      supabase
-        .from("conversations")
-        .select("id,title,mode,created_at,updated_at")
-        .eq("user_id", user.id)
-        .is("archived_at", null)
-        .order("updated_at", { ascending: false }),
-      supabase
-        .from("knowledge_collections")
-        .select("*")
-        .eq("owner_user_id", user.id)
-        .order("updated_at", { ascending: false }),
-      supabase
-        .from("user_settings")
-        .select("metadata")
-        .eq("user_id", user.id)
-        .maybeSingle(),
-    ]);
+    supabase
+      .from("user_profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("conversations")
+      .select("id,title,mode,created_at,updated_at")
+      .eq("user_id", user.id)
+      .is("archived_at", null)
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("knowledge_collections")
+      .select("*")
+      .eq("owner_user_id", user.id)
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("user_settings")
+      .select("metadata")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+  ]);
 
   const projects =
     collections?.filter(isProjectCollection).map((project) =>
@@ -80,6 +80,14 @@ export default async function ChatPage({ searchParams }: PageProps) {
         .eq("user_id", user.id)
         .order("created_at", { ascending: true })
     : { data: [] };
+
+  let subscription: { planId: string; status: string; createdAt: string } | null = null;
+  if (userSettings?.metadata && typeof userSettings.metadata === "object" && !Array.isArray(userSettings.metadata)) {
+    const meta = userSettings.metadata as Record<string, unknown>;
+    if (meta.subscription && typeof meta.subscription === "object") {
+      subscription = meta.subscription as { planId: string; status: string; createdAt: string };
+    }
+  }
 
   return (
     <TruqpediaShell
@@ -127,6 +135,7 @@ export default async function ChatPage({ searchParams }: PageProps) {
       initialAssistantPreferences={readAssistantPreferences(
         userSettings?.metadata,
       )}
+      initialSubscription={subscription}
     />
   );
 }
@@ -152,6 +161,7 @@ function readAssistantPreferences(metadata: Json | undefined): AssistantPreferen
   };
 }
 
+// Helpers
 function readString(value: Json | undefined) {
   return typeof value === "string" ? value : undefined;
 }

@@ -74,6 +74,7 @@ type TruqpediaShellProps = {
   initialConversationId: string | null;
   initialProjectId: string | null;
   initialAssistantPreferences: AssistantPreferences;
+  initialSubscription?: { planId: string; status: string; createdAt: string } | null;
 };
 
 const workflowPrompts = [
@@ -117,6 +118,7 @@ export function TruqpediaShell({
   initialConversationId,
   initialProjectId,
   initialAssistantPreferences,
+  initialSubscription,
 }: TruqpediaShellProps) {
   const [conversations, setConversations] =
     useState<UiConversation[]>(initialConversations);
@@ -1661,6 +1663,7 @@ export function TruqpediaShell({
           preferencesSaving={preferencesSaving}
           status={settingsStatus}
           user={user}
+          subscription={initialSubscription}
         />
         <ProjectCreateDialog
           description={projectDescription}
