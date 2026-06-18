@@ -1,8 +1,9 @@
-import { PDFParse } from "pdf-parse";
-import * as xlsx from "xlsx";
+import { createRequire } from "module";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { optionalEnv } from "@/lib/utils";
+
+const require = createRequire(import.meta.url);
 
 // 1. Recursive text splitter for PDFs/Documents
 export function splitTextRecursively(text: string, chunkSize = 1000, chunkOverlap = 200): string[] {
@@ -50,6 +51,7 @@ export function splitTextRecursively(text: string, chunkSize = 1000, chunkOverla
 
 // 2. Excel/CSV parser (row-based chunking)
 export function parseExcelOrCsv(buffer: Buffer): string[] {
+  const xlsx = require("xlsx") as typeof import("xlsx");
   const workbook = xlsx.read(buffer, { type: "buffer" });
   const chunks: string[] = [];
 
@@ -76,6 +78,7 @@ export function parseExcelOrCsv(buffer: Buffer): string[] {
 
 // 3. PDF parser wrapper
 export async function parsePdf(buffer: Buffer): Promise<string> {
+  const { PDFParse } = await import("pdf-parse");
   const parser = new PDFParse({ data: buffer });
   try {
     const data = await parser.getText();

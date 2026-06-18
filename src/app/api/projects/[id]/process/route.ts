@@ -47,23 +47,51 @@ export async function POST(
     }
 
     // 2. Insert or update the document asset in database
-    const { data: docAsset, error: docError } = await supabase
+    const { data: existingAssets, error: existingAssetError } = await supabase
       .from("document_assets")
-      .upsert(
-        {
-          owner_user_id: user.id,
-          collection_id: collectionId,
-          file_name: fileName,
-          mime_type: mimeType || "application/octet-stream",
-          storage_path: storagePath,
-          status: "uploaded",
-          metadata: {
-            stage: "pending",
-            size: size || 0,
-          },
-        },
-        { onConflict: "storage_path" }
-      )
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .eq("collection_id", collectionId)
+      .eq("storage_path", storagePath)
+      .limit(1);
+
+    if (existingAssetError) {
+      return NextResponse.json(
+        { error: `Erro ao procurar documento no banco: ${existingAssetError.message}` },
+        { status: 500 }
+      );
+    }
+
+    const existingAssetId = existingAssets?.[0]?.id;
+    const documentPayload = {
+      collection_id: collectionId,
+      file_name: fileName,
+      mime_type: mimeType || "application/octet-stream",
+      storage_path: storagePath,
+      status: "uploaded" as const,
+      metadata: {
+        stage: "pending",
+        size: size || 0,
+      },
+    };
+
+    const documentQuery = existingAssetId
+      ? supabase
+          .from("document_assets")
+          .update({
+            ...documentPayload,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingAssetId)
+          .eq("owner_user_id", user.id)
+      : supabase
+          .from("document_assets")
+          .insert({
+            ...documentPayload,
+            owner_user_id: user.id,
+          });
+
+    const { data: docAsset, error: docError } = await documentQuery
       .select("id")
       .single();
 

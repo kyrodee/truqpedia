@@ -40,8 +40,12 @@ export async function POST(request: Request) {
     if (topic === "payment" && resourceId) {
       const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN;
       if (!accessToken) {
-        logError("webhook.mercado_pago.missing_token", { resourceId });
-        return NextResponse.json({ error: "Access token not configured" }, { status: 500 });
+        logInfo("webhook.mercado_pago.missing_token", { resourceId });
+        return NextResponse.json({
+          received: true,
+          skipped: true,
+          reason: "Access token not configured",
+        });
       }
 
       // Fetch payment details directly from Mercado Pago API
