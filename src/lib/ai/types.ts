@@ -13,6 +13,8 @@ export type ProviderStreamRequest = {
   messages: ProviderMessage[];
   sources: SourceResult[];
   config: ProviderRuntimeConfig;
+  model?: string;
+  temperature?: number;
   abortSignal?: AbortSignal;
 };
 
@@ -37,4 +39,3 @@ export type ProviderAttemptResult = {
   failed: boolean;
   errorMessage?: string;
 };
-

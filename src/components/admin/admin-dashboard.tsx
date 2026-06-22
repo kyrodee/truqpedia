@@ -132,17 +132,6 @@ export function AdminDashboard({
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                   <ConfigField
-                    id={`${provider.id}-priority`}
-                    label="Prioridade"
-                    type="number"
-                    value={String(provider.priority)}
-                    onChange={(value) =>
-                      updateProvider(provider.id, {
-                        priority: Number(value),
-                      })
-                    }
-                  />
-                  <ConfigField
                     id={`${provider.id}-timeout`}
                     label="Timeout ms"
                     type="number"
@@ -154,20 +143,11 @@ export function AdminDashboard({
                     }
                   />
                   <ConfigField
-                    id={`${provider.id}-speed`}
-                    label="Modelo rapido"
-                    value={provider.speedModel}
-                    onChange={(speedModel) =>
-                      updateProvider(provider.id, { speedModel })
-                    }
-                  />
-                  <ConfigField
-                    id={`${provider.id}-deep`}
-                    label="Modelo profundo"
+                    id={`${provider.id}-model`}
+                    label="Modelo unico"
                     value={provider.deepModel}
-                    onChange={(deepModel) =>
-                      updateProvider(provider.id, { deepModel })
-                    }
+                    onChange={() => undefined}
+                    disabled
                   />
                   <div className="md:col-span-2">
                     <ConfigField
@@ -283,12 +263,14 @@ function ConfigField({
   value,
   onChange,
   type = "text",
+  disabled = false,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -298,6 +280,7 @@ function ConfigField({
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
       />
     </div>
   );

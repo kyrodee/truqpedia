@@ -3,12 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { DEFAULT_CHAT_MODE, FREE_MESSAGE_LIMIT } from "@/lib/constants";
 import { buildProviderMessages, streamWithFallback } from "@/lib/ai/model-router";
-import { classifyChatIntent } from "@/lib/ai/intent";
+import { classifyChatIntentWithAi } from "@/lib/ai/intent";
 import {
   buildConversationMemory,
   persistConversationMemory,
   readConversationMemory,
 } from "@/lib/ai/memory";
+import { searchProjectKnowledge } from "@/lib/ai/rag-search";
 import { logError, logInfo } from "@/lib/logger";
 import { searchWeb } from "@/lib/search/web-search";
 import { decideWebSearch } from "@/lib/search/auto-search";
@@ -31,9 +32,8 @@ import type {
   SourceResult,
   StreamEvent,
 } from "@/lib/types";
-import { recordUsageLog } from "@/lib/usage/metrics";
+import { recordUsageLog, recordWebSearchLog } from "@/lib/usage/metrics";
 import { toSse, truncate } from "@/lib/utils";
-import { generateGeminiEmbeddings } from "@/lib/ai/rag-worker";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,11 +97,11 @@ export async function POST(request: NextRequest) {
   }
 
   const body = { ...parsed.data, mode: DEFAULT_CHAT_MODE };
-  const intent = classifyChatIntent({
+  const intent = await classifyChatIntentWithAi({
     message: body.message,
     attachments: body.attachments,
     preferences: body.preferences,
-  });
+  }, { abortSignal: request.signal });
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -337,6 +337,12 @@ export async function POST(request: NextRequest) {
             detail: searchDecision.reason,
           });
           sources = await searchWeb(searchDecision.query);
+          await recordWebSearchLog({
+            userId: user?.id,
+            conversationId,
+            query: searchDecision.query,
+            sources,
+          });
           send({
             type: "activity",
             label: sources.length
@@ -366,48 +372,24 @@ export async function POST(request: NextRequest) {
               label: "Consultando base de conhecimento do projeto...",
             });
 
-            const embeddings = await generateGeminiEmbeddings([body.message]);
-            const queryEmbedding = embeddings[0];
+            const ragSources = await searchProjectKnowledge({
+              supabase,
+              projectId: body.projectId,
+              query: body.message,
+            });
 
-            if (queryEmbedding) {
-              /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-              const { data: chunks, error: matchError } = await (supabase as any).rpc(
-                "match_knowledge_chunks",
-                {
-                  query_embedding: queryEmbedding,
-                  match_threshold: 0.35,
-                  match_count: 8,
-                  filter_collection_id: body.projectId,
-                  query_text: body.message,
-                }
-              );
+            if (ragSources.length > 0) {
+              sources = [...sources, ...ragSources];
 
-              if (matchError) {
-                logError("chat.rag.match_failed", matchError);
-              } else if (chunks && chunks.length > 0) {
-                const ragSources: SourceResult[] = (chunks as Array<{
-                  content: string;
-                  document_id: string;
-                  metadata?: { file_name?: string; chunk_index?: number };
-                }>).map((chunk) => ({
-                  title: `${chunk.metadata?.file_name ?? "Documento"} (Ref #${(chunk.metadata?.chunk_index ?? 0) + 1})`,
-                  url: `file:///projects/${body.projectId}/files/${chunk.document_id}`,
-                  snippet: chunk.content,
-                  provider: "project_rag",
-                }));
-
-                sources = [...sources, ...ragSources];
-
-                send({
-                  type: "activity",
-                  label: `Encontrei ${ragSources.length} referências no projeto`,
-                });
-              } else {
-                send({
-                  type: "activity",
-                  label: "Nenhuma referência encontrada no projeto",
-                });
-              }
+              send({
+                type: "activity",
+                label: `Encontrei ${ragSources.length} referencias no projeto`,
+              });
+            } else {
+              send({
+                type: "activity",
+                label: "Nenhuma referencia encontrada no projeto",
+              });
             }
           } catch (ragError) {
             logError("chat.rag.failed", ragError);
@@ -470,6 +452,7 @@ export async function POST(request: NextRequest) {
           mode: body.mode,
           messages: providerMessages,
           sources,
+          intent,
           userId: user?.id,
           conversationId,
           abortSignal: request.signal,
@@ -581,6 +564,8 @@ function serializeSources(sources: SourceResult[]) {
     url: source.url,
     snippet: source.snippet,
     provider: source.provider,
+    score: source.score,
+    metadata: source.metadata,
   }));
 }
 

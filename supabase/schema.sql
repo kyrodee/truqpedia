@@ -3,6 +3,7 @@
 
 create extension if not exists pgcrypto;
 create extension if not exists vector;
+create extension if not exists pg_trgm;
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -194,6 +195,12 @@ create index if not exists idx_document_assets_owner
 create index if not exists idx_knowledge_chunks_collection
   on public.knowledge_chunks(collection_id);
 
+create index if not exists idx_knowledge_chunks_embedding_hnsw
+  on public.knowledge_chunks using hnsw (embedding vector_cosine_ops);
+
+create index if not exists idx_knowledge_chunks_content_trgm
+  on public.knowledge_chunks using gin (content gin_trgm_ops);
+
 drop trigger if exists trg_user_profiles_updated_at on public.user_profiles;
 create trigger trg_user_profiles_updated_at
 before update on public.user_profiles
@@ -275,19 +282,21 @@ $$;
 insert into public.ai_provider_settings
   (id, display_name, enabled, priority, speed_model, deep_model, base_url, timeout_ms, metadata)
 values
-  ('groq', 'Groq', true, 10, 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'https://api.groq.com/openai/v1', 30000, '{"deep_model_fallbacks":["llama-3.3-70b-versatile"]}'::jsonb),
-  ('openrouter', 'OpenRouter', true, 20, 'meta-llama/llama-3.1-8b-instruct:free', 'anthropic/claude-3.5-sonnet', 'https://openrouter.ai/api/v1', 25000, '{}'::jsonb),
-  ('gemini', 'Gemini', true, 30, 'gemini-1.5-flash', 'gemini-1.5-pro', null, 25000, '{}'::jsonb),
-  ('cohere', 'Cohere', true, 40, 'command-r7b-12-2024', 'command-r-plus', null, 25000, '{}'::jsonb),
-  ('grok', 'Grok / xAI', true, 50, 'grok-3-mini', 'grok-3', 'https://api.x.ai/v1', 30000, '{}'::jsonb)
+  ('groq', 'Groq', true, 10, 'openai/gpt-oss-120b', 'openai/gpt-oss-120b', 'https://api.groq.com/openai/v1', 30000, '{"speed_model_fallbacks":[],"deep_model_fallbacks":[]}'::jsonb)
 on conflict (id) do update set
   display_name = excluded.display_name,
+  enabled = true,
   priority = excluded.priority,
   speed_model = excluded.speed_model,
   deep_model = excluded.deep_model,
   base_url = excluded.base_url,
   timeout_ms = excluded.timeout_ms,
   metadata = excluded.metadata;
+
+update public.ai_provider_settings
+set enabled = false,
+    updated_at = now()
+where id <> 'groq';
 
 alter table public.user_profiles enable row level security;
 alter table public.user_settings enable row level security;
@@ -421,6 +430,8 @@ language plpgsql
 stable
 security definer
 as $$
+declare
+  normalized_query text := regexp_replace(coalesce(query_text, ''), '[^a-zA-Z0-9]', '', 'g');
 begin
   return query
   select
@@ -438,13 +449,21 @@ begin
       or (
         query_text is not null 
         and length(query_text) >= 3 
-        and kc.content ilike '%' || query_text || '%'
+        and (
+          kc.content ilike '%' || query_text || '%'
+          or (
+            length(normalized_query) >= 3
+            and regexp_replace(kc.content, '[^a-zA-Z0-9]', '', 'g') ilike '%' || normalized_query || '%'
+          )
+        )
       )
     )
   order by
     (case 
       when query_text is not null and length(query_text) >= 3 and kc.content ilike '%' || query_text || '%' 
-      then 1.5 
+      then 1.8
+      when length(normalized_query) >= 3 and regexp_replace(kc.content, '[^a-zA-Z0-9]', '', 'g') ilike '%' || normalized_query || '%'
+      then 1.6
       else 1.0 
     end) * (1 - (kc.embedding <=> query_embedding)) desc
   limit match_count;

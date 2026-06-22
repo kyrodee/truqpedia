@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseDuckDuckGoResults } from "@/lib/search/web-search";
+import {
+  buildSearchQueries,
+  parseDuckDuckGoResults,
+  rankSearchResults,
+} from "@/lib/search/web-search";
 
 describe("parseDuckDuckGoResults", () => {
   it("extracts and unwraps DuckDuckGo result links", () => {
@@ -18,5 +22,35 @@ describe("parseDuckDuckGoResults", () => {
         provider: "DuckDuckGo",
       },
     ]);
+  });
+
+  it("builds targeted reference queries", () => {
+    expect(buildSearchQueries("A 9604600105 serve no Atego", "a9604600105")).toEqual(
+      expect.arrayContaining([
+        "a9604600105",
+        "\"a9604600105\" catalogo",
+      ]),
+    );
+  });
+
+  it("filters reference searches to sources that mention the reference", () => {
+    const ranked = rankSearchResults(
+      [
+        {
+          title: "Catalogo terminal A9604600105",
+          url: "https://parts.example.com/a9604600105",
+          snippet: "Terminal direcao A9604600105 para conferir.",
+        },
+        {
+          title: "Catalogo generico",
+          url: "https://parts.example.com/generic",
+          snippet: "Catalogo de terminais sem codigo.",
+        },
+      ],
+      "a9604600105",
+    );
+
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].metadata?.referenceMatch).toBe(true);
   });
 });

@@ -45,9 +45,10 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
 
     const model =
-      request.mode === "speed"
+      request.model ??
+      (request.mode === "speed"
         ? request.config.speedModel
-        : request.config.deepModel;
+        : request.config.deepModel);
 
     const response = await fetchWithProviderErrors(
       `${request.config.baseUrl ?? this.defaultBaseUrl}/chat/completions`,
@@ -61,7 +62,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         body: JSON.stringify({
           model,
           messages: request.messages,
-          temperature: request.mode === "speed" ? 0.25 : 0.35,
+          temperature: request.temperature ?? 0.3,
           stream: true,
         }),
       },
@@ -76,4 +77,3 @@ export class OpenAICompatibleProvider implements AIProvider {
     };
   }
 }
-

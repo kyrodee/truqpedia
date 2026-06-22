@@ -8,24 +8,26 @@ export const FREE_MESSAGE_LIMIT = readPublicPositiveIntEnv(
 
 export const DEFAULT_CHAT_MODE = "deep" as const;
 
+export const GROQ_PRIMARY_MODEL = "openai/gpt-oss-120b" as const;
+
 export const DEFAULT_SPEED_MODEL = {
-  groq: "llama-3.1-8b-instant",
-  openrouter: "meta-llama/llama-3.1-8b-instruct:free",
-  gemini: "gemini-1.5-flash",
-  cohere: "command-r7b-12-2024",
-  grok: "grok-3-mini",
+  groq: GROQ_PRIMARY_MODEL,
+  openrouter: GROQ_PRIMARY_MODEL,
+  gemini: GROQ_PRIMARY_MODEL,
+  cohere: GROQ_PRIMARY_MODEL,
+  grok: GROQ_PRIMARY_MODEL,
 } as const;
 
 export const DEFAULT_DEEP_MODEL = {
-  groq: "openai/gpt-oss-120b",
-  openrouter: "anthropic/claude-3.5-sonnet",
-  gemini: "gemini-1.5-pro",
-  cohere: "command-r-plus",
-  grok: "grok-3",
+  groq: GROQ_PRIMARY_MODEL,
+  openrouter: GROQ_PRIMARY_MODEL,
+  gemini: GROQ_PRIMARY_MODEL,
+  cohere: GROQ_PRIMARY_MODEL,
+  grok: GROQ_PRIMARY_MODEL,
 } as const;
 
 export const DEFAULT_DEEP_MODEL_FALLBACKS = {
-  groq: ["llama-3.3-70b-versatile"],
+  groq: [],
   openrouter: [],
   gemini: [],
   cohere: [],

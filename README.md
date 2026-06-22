@@ -2,7 +2,7 @@
 
 Truqpedia is a professional AI SaaS for auto parts, heavy vehicles, trucks, buses, road implements, diesel maintenance, technical sales and parts support.
 
-The app is built with Next.js 15, React 19, TypeScript, TailwindCSS v4, shadcn-style Radix components and Supabase Auth/PostgreSQL. It is ready for Vercel deployment and already includes a provider router for Groq, OpenRouter, Gemini, Cohere and Grok/xAI.
+The app is built with Next.js 15, React 19, TypeScript, TailwindCSS v4, shadcn-style Radix components and Supabase Auth/PostgreSQL. The chat runtime uses one primary model: Groq `openai/gpt-oss-120b`.
 
 ## What is included
 

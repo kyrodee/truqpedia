@@ -1,4 +1,4 @@
-import type { ProviderId } from "@/lib/types";
+import type { ProviderId, SourceResult } from "@/lib/types";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/supabase/database.types";
 
@@ -51,5 +51,29 @@ export async function recordUsageLog(input: {
     conversation_id: input.conversationId ?? null,
     event_type: input.eventType,
     metadata: input.metadata ?? {},
+  });
+}
+
+export async function recordWebSearchLog(input: {
+  userId?: string | null;
+  conversationId?: string | null;
+  query: string;
+  provider?: string | null;
+  sources: SourceResult[];
+}) {
+  const supabase = createSupabaseAdminClient();
+
+  if (!supabase) {
+    return;
+  }
+
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+  await (supabase as any).from("web_search_logs").insert({
+    user_id: input.userId ?? null,
+    conversation_id: input.conversationId ?? null,
+    query: input.query,
+    provider: input.provider ?? input.sources[0]?.provider ?? null,
+    result_count: input.sources.length,
+    sources: input.sources as unknown as Json,
   });
 }

@@ -25,6 +25,7 @@ describe("conversation memory", () => {
 
     expect(memory.lastIntent).toBe("cross_reference");
     expect(memory.entities).toEqual(expect.arrayContaining(["ABC1234", "DEF5678"]));
+    expect(memory.partCodes).toEqual(expect.arrayContaining(["ABC1234", "DEF5678"]));
     expect(memory.openQuestions).toContain(
       "codigo original, OEM ou referencia da marca",
     );
@@ -34,6 +35,10 @@ describe("conversation memory", () => {
     const prompt = memoryToPrompt({
       summary: "Usuario esta comparando codigos de uma peca pesada.",
       entities: ["ABC1234"],
+      partCodes: ["ABC1234"],
+      vehicles: ["Volvo"],
+      decisions: ["compatibilidade precisa de catalogo"],
+      businessPreferences: ["usa respostas para anuncio de marketplace"],
       openQuestions: ["confirmar chassi"],
       lastIntent: "cross_reference",
       updatedAt: "2026-06-15T12:00:00.000Z",
@@ -41,6 +46,8 @@ describe("conversation memory", () => {
 
     expect(prompt).toContain("Memoria resumida desta conversa");
     expect(prompt).toContain("ABC1234");
+    expect(prompt).toContain("Veiculos citados");
+    expect(prompt).toContain("Decisoes anteriores");
     expect(prompt).toContain("confirmar chassi");
   });
 });

@@ -2,10 +2,6 @@ import { optionalEnv } from "@/lib/utils";
 
 export const AI_PROVIDER_ENV_NAMES = [
   "GROQ_API_KEY",
-  "OPENROUTER_API_KEY",
-  "GEMINI_API_KEY",
-  "COHERE_API_KEY",
-  "XAI_API_KEY",
 ] as const;
 
 export const SEARCH_PROVIDER_ENV_NAMES = [

@@ -12,23 +12,35 @@ export async function searchWeb(query: string): Promise<SourceResult[]> {
     "duckduckgo",
   ];
   const reference = extractReferenceFromQuery(query);
+  const queries = buildSearchQueries(query, reference);
+  const collected: SourceResult[] = [];
 
   for (const provider of providers) {
-    try {
-      const results = await runSearch(provider, query);
-      const filteredResults = reference
-        ? filterResultsByReference(results, reference)
-        : results;
+    for (const candidateQuery of queries) {
+      try {
+        const results = await runSearch(provider, candidateQuery);
+        collected.push(
+          ...results.map((result) => ({
+            ...result,
+            metadata: {
+              ...(result.metadata ?? {}),
+              query: candidateQuery,
+            },
+          })),
+        );
 
-      if (filteredResults.length > 0) {
-        return filteredResults.slice(0, 5);
+        const ranked = rankSearchResults(collected, reference);
+
+        if (ranked.length >= 5) {
+          return ranked.slice(0, 5);
+        }
+      } catch {
+        continue;
       }
-    } catch {
-      continue;
     }
   }
 
-  return [];
+  return rankSearchResults(collected, reference).slice(0, 5);
 }
 
 function extractReferenceFromQuery(query: string) {
@@ -43,21 +55,138 @@ function extractReferenceFromQuery(query: string) {
   return codeReference ? normalizeReference(codeReference) : null;
 }
 
-function filterResultsByReference(
+export function rankSearchResults(
   results: SourceResult[],
-  reference: string,
+  reference: string | null = null,
 ) {
-  return results.filter((result) => {
-    const haystack = normalizeReference(
-      `${result.title} ${result.snippet} ${result.url}`,
-    );
+  const deduped = dedupeResults(results);
+  const ranked = deduped
+    .map((result) => {
+      const referenceMatch = reference
+        ? normalizeReference(
+            `${result.title} ${result.snippet} ${result.url}`,
+          ).includes(reference)
+        : false;
+      const domainScore = scoreSourceDomain(result.url);
+      const snippetScore = result.snippet.length > 80 ? 0.04 : 0;
+      const score = domainScore + snippetScore + (referenceMatch ? 1 : 0);
 
-    return haystack.includes(reference);
-  });
+      return {
+        ...result,
+        score: Number(score.toFixed(4)),
+        metadata: {
+          ...(result.metadata ?? {}),
+          referenceMatch,
+          sourceQuality: domainScore,
+        },
+      };
+    })
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+  if (!reference) {
+    return ranked;
+  }
+
+  return ranked.filter((result) => result.metadata?.referenceMatch === true);
+}
+
+export function buildSearchQueries(query: string, reference: string | null) {
+  const clean = query.replace(/\s+/g, " ").trim();
+
+  if (!reference) {
+    return [clean];
+  }
+
+  return uniqueQueries([
+    reference,
+    `"${reference}" catalogo`,
+    `"${reference}" OEM equivalente`,
+    clean,
+  ]);
 }
 
 function normalizeReference(value: string) {
   return value.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function dedupeResults(results: SourceResult[]) {
+  const seen = new Set<string>();
+  const deduped: SourceResult[] = [];
+
+  for (const result of results) {
+    const key = normalizeResultUrl(result.url);
+
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(result);
+  }
+
+  return deduped;
+}
+
+function normalizeResultUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    parsed.searchParams.sort();
+    return parsed.toString().toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function scoreSourceDomain(url: string) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+
+    if (
+      [
+        "bosch",
+        "mahle",
+        "mann-filter",
+        "fleetguard",
+        "cummins",
+        "volvo",
+        "scania",
+        "mercedes-benz",
+        "iveco",
+        "daf",
+        "vw",
+      ].some((domainPart) => hostname.includes(domainPart))
+    ) {
+      return 0.3;
+    }
+
+    if (hostname.includes("catalog") || hostname.includes("parts")) {
+      return 0.18;
+    }
+
+    return 0.08;
+  } catch {
+    return 0;
+  }
+}
+
+function uniqueQueries(queries: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const query of queries) {
+    const clean = query.replace(/\s+/g, " ").trim();
+    const key = clean.toLowerCase();
+
+    if (!clean || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(clean);
+  }
+
+  return result.slice(0, 4);
 }
 
 async function runSearch(provider: SearchProvider, query: string) {

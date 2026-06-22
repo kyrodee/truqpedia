@@ -9,6 +9,8 @@ export type SourceResult = {
   url: string;
   snippet: string;
   provider?: string;
+  score?: number;
+  metadata?: Record<string, string | number | boolean | null>;
 };
 
 export type ChatMessage = {
@@ -66,6 +68,10 @@ export type ConversationMemory = {
   summary: string;
   openQuestions: string[];
   entities: string[];
+  partCodes?: string[];
+  vehicles?: string[];
+  decisions?: string[];
+  businessPreferences?: string[];
   lastIntent?: ChatIntentId;
   updatedAt: string;
 };

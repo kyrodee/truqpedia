@@ -1,8 +1,7 @@
 import {
   DEFAULT_DEEP_MODEL,
-  DEFAULT_DEEP_MODEL_FALLBACKS,
   DEFAULT_SPEED_MODEL,
-  SYSTEM_PROMPT,
+  GROQ_PRIMARY_MODEL,
 } from "@/lib/constants";
 import { createProviders } from "@/lib/ai/providers";
 import { ProviderError } from "@/lib/ai/streaming";
@@ -10,6 +9,7 @@ import type { ProviderMessage } from "@/lib/ai/types";
 import { recordProviderMetric } from "@/lib/usage/metrics";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { memoryToPrompt } from "@/lib/ai/memory";
+import { buildSystemPrompt } from "@/lib/ai/prompts";
 import type {
   ChatMessage,
   ChatMode,
@@ -31,44 +31,7 @@ const DEFAULT_PROVIDER_CONFIGS: ProviderRuntimeConfig[] = [
     priority: 10,
     speedModel: DEFAULT_SPEED_MODEL.groq,
     deepModel: DEFAULT_DEEP_MODEL.groq,
-    deepModelFallbacks: [...DEFAULT_DEEP_MODEL_FALLBACKS.groq],
     timeoutMs: 20000,
-  },
-  {
-    id: "openrouter",
-    name: "OpenRouter",
-    enabled: true,
-    priority: 20,
-    speedModel: DEFAULT_SPEED_MODEL.openrouter,
-    deepModel: DEFAULT_DEEP_MODEL.openrouter,
-    timeoutMs: 25000,
-  },
-  {
-    id: "gemini",
-    name: "Gemini",
-    enabled: true,
-    priority: 30,
-    speedModel: DEFAULT_SPEED_MODEL.gemini,
-    deepModel: DEFAULT_DEEP_MODEL.gemini,
-    timeoutMs: 25000,
-  },
-  {
-    id: "cohere",
-    name: "Cohere",
-    enabled: true,
-    priority: 40,
-    speedModel: DEFAULT_SPEED_MODEL.cohere,
-    deepModel: DEFAULT_DEEP_MODEL.cohere,
-    timeoutMs: 25000,
-  },
-  {
-    id: "grok",
-    name: "Grok / xAI",
-    enabled: true,
-    priority: 50,
-    speedModel: DEFAULT_SPEED_MODEL.grok,
-    deepModel: DEFAULT_DEEP_MODEL.grok,
-    timeoutMs: 30000,
   },
 ];
 
@@ -88,7 +51,13 @@ export async function loadProviderConfigs(): Promise<ProviderRuntimeConfig[]> {
     return DEFAULT_PROVIDER_CONFIGS;
   }
 
-  return data.map((row) => {
+  const rows = data.filter((row) => row.id === "groq");
+
+  if (rows.length === 0) {
+    return DEFAULT_PROVIDER_CONFIGS;
+  }
+
+  return rows.slice(0, 1).map((row) => {
     const typed = row as {
       id: ProviderId;
       display_name: string;
@@ -98,19 +67,17 @@ export async function loadProviderConfigs(): Promise<ProviderRuntimeConfig[]> {
       deep_model: string;
       base_url: string | null;
       timeout_ms: number;
-      metadata?: unknown;
     };
-    const metadata = readProviderMetadata(typed.metadata);
 
     return {
-      id: typed.id,
-      name: typed.display_name,
+      id: "groq" as const,
+      name: typed.display_name || "Groq",
       enabled: typed.enabled,
-      priority: typed.priority,
-      speedModel: typed.speed_model,
-      deepModel: typed.deep_model,
-      speedModelFallbacks: metadata.speedModelFallbacks,
-      deepModelFallbacks: metadata.deepModelFallbacks,
+      priority: 10,
+      speedModel: GROQ_PRIMARY_MODEL,
+      deepModel: GROQ_PRIMARY_MODEL,
+      speedModelFallbacks: [],
+      deepModelFallbacks: [],
       baseUrl: typed.base_url ?? undefined,
       timeoutMs: typed.timeout_ms,
     };
@@ -136,7 +103,7 @@ export function buildProviderMessages(input: {
       ? `\n\nFontes recentes consultadas:\n${input.sources
           .map(
             (source, index) =>
-              `[${index + 1}] ${source.title}\nURL: ${source.url}\nResumo: ${source.snippet}`,
+              `[${index + 1}] ${source.title}\nURL: ${source.url}\nScore: ${source.score ?? "n/a"}\nMetadados: ${formatSourceMetadata(source.metadata)}\nResumo: ${source.snippet}`,
           )
           .join("\n\n")}\n\nUse marcadores de citacao no corpo da resposta, como [1] ou [2], sempre que uma afirmacao vier dessas fontes. Nao crie uma secao longa de links no final: a interface ja mostra as fontes consultadas de forma discreta. Nao invente fontes nem atribua uma fonte a uma afirmacao que ela nao sustenta. Para codigo/referencia: se a fonte nao mencionar explicitamente o codigo pesquisado, nao trate como confirmacao da peca; no maximo cite como catalogo/local onde consultar.`
       : "";
@@ -148,7 +115,7 @@ export function buildProviderMessages(input: {
   const messages: ProviderMessage[] = [
     {
       role: "system",
-      content: `${SYSTEM_PROMPT}${preferenceContext}${memoryContext}${intentContext}${searchContext}${searchAttemptContext}`,
+      content: `${buildSystemPrompt(input.intent)}${preferenceContext}${memoryContext}${intentContext}${searchContext}${searchAttemptContext}`,
     },
     ...input.history
       .filter((message) => message.role !== "system")
@@ -188,6 +155,19 @@ function buildIntentContext(intent: IntentClassification | undefined) {
 - Estrutura preferida: ${intent.responseShape.join(" -> ")}.${missingData}${clarifyInstruction}
 ${guardrails}
 Use essa classificacao para priorizar o formato da resposta, mas ajuste se a conversa mostrar que a intencao real e outra.`;
+}
+
+function formatSourceMetadata(
+  metadata: SourceResult["metadata"] | undefined,
+) {
+  if (!metadata || Object.keys(metadata).length === 0) {
+    return "n/a";
+  }
+
+  return Object.entries(metadata)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ");
 }
 
 function buildIntentGuardrails(intent: IntentClassification) {
@@ -332,6 +312,7 @@ export async function* streamWithFallback(input: {
   mode: ChatMode;
   messages: ProviderMessage[];
   sources: SourceResult[];
+  intent?: IntentClassification;
   userId?: string | null;
   conversationId?: string | null;
   abortSignal?: AbortSignal;
@@ -350,15 +331,20 @@ export async function* streamWithFallback(input: {
       continue;
     }
 
-    const effectiveMode = input.mode;
-    const modelCandidates = getModelCandidates(config, effectiveMode);
+    const effectiveMode = "deep" as const;
+    const generationProfile = selectGenerationProfile({
+      intent: input.intent,
+      sourceCount: input.sources.length,
+    });
+    const modelCandidates = [generationProfile.model];
 
     for (const modelCandidate of modelCandidates) {
       const startedAt = Date.now();
-      const attemptConfig =
-        effectiveMode === "speed"
-          ? { ...config, speedModel: modelCandidate }
-          : { ...config, deepModel: modelCandidate };
+      const attemptConfig = {
+        ...config,
+        speedModel: modelCandidate,
+        deepModel: modelCandidate,
+      };
       let assembled = "";
       let emittedAnyToken = false;
 
@@ -368,6 +354,8 @@ export async function* streamWithFallback(input: {
           messages: input.messages,
           sources: input.sources,
           config: attemptConfig,
+          model: modelCandidate,
+          temperature: generationProfile.temperature,
           abortSignal: input.abortSignal,
         });
 
@@ -427,7 +415,7 @@ export async function* streamWithFallback(input: {
     yield {
       type: "error",
       message:
-        "Nenhum provedor de IA esta configurado. Defina pelo menos uma chave em .env.local para GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, COHERE_API_KEY ou XAI_API_KEY.",
+        "Nenhum provedor de IA esta configurado. Defina GROQ_API_KEY em .env.local para usar o modelo openai/gpt-oss-120b no Groq.",
     };
     return;
   }
@@ -442,53 +430,45 @@ function estimateTokens(text: string) {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
-function getModelCandidates(config: ProviderRuntimeConfig, mode: ChatMode) {
-  const primary = mode === "speed" ? config.speedModel : config.deepModel;
-  const fallbacks =
-    mode === "speed" ? config.speedModelFallbacks : config.deepModelFallbacks;
+export function selectGenerationProfile(input: {
+  intent?: IntentClassification;
+  sourceCount?: number;
+}) {
+  const id = input.intent?.id;
+  const hasSources = (input.sourceCount ?? 0) > 0;
 
-  return uniqueModels([primary, ...(fallbacks ?? [])]);
-}
-
-function uniqueModels(models: string[]) {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const model of models) {
-    const clean = model.trim();
-    const key = clean.toLowerCase();
-
-    if (!clean || seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    result.push(clean);
+  if (id === "casual_conversation") {
+    return {
+      model: GROQ_PRIMARY_MODEL,
+      temperature: 0.35,
+      strategy: "short_conversation",
+    } as const;
   }
 
-  return result;
-}
-
-function readProviderMetadata(metadata: unknown) {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    return {};
+  if (
+    id === "application_check" ||
+    id === "cross_reference" ||
+    id === "diagnosis" ||
+    hasSources
+  ) {
+    return {
+      model: GROQ_PRIMARY_MODEL,
+      temperature: 0.18,
+      strategy: "grounded_technical",
+    } as const;
   }
 
-  const value = metadata as {
-    speed_model_fallbacks?: unknown;
-    deep_model_fallbacks?: unknown;
-  };
+  if (id === "marketplace_copy") {
+    return {
+      model: GROQ_PRIMARY_MODEL,
+      temperature: 0.28,
+      strategy: "controlled_copywriting",
+    } as const;
+  }
 
   return {
-    speedModelFallbacks: readStringArray(value.speed_model_fallbacks),
-    deepModelFallbacks: readStringArray(value.deep_model_fallbacks),
-  };
-}
-
-function readStringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  return value.filter((item): item is string => typeof item === "string");
+    model: GROQ_PRIMARY_MODEL,
+    temperature: 0.24,
+    strategy: "balanced_support",
+  } as const;
 }

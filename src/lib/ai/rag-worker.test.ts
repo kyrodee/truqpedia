@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { splitTextRecursively, parseExcelOrCsv } from "./rag-worker";
+import {
+  extractPartReferences,
+  parseExcelOrCsv,
+  parseExcelOrCsvChunks,
+  splitTextRecursively,
+} from "./rag-worker";
 import * as xlsx from "xlsx";
 
 describe("rag-worker.ts core logic", () => {
@@ -37,7 +42,7 @@ describe("rag-worker.ts core logic", () => {
       const chunks = parseExcelOrCsv(buffer);
 
       expect(chunks.length).toBe(2);
-      expect(chunks[0]).toContain("Catálogo: Pecas");
+      expect(chunks[0]).toContain("Catalogo: Pecas");
       expect(chunks[0]).toContain("Linha 2");
       expect(chunks[0]).toContain("[Codigo: A9604600105]");
       expect(chunks[0]).toContain("[Descricao: Terminal Direcao]");
@@ -45,6 +50,32 @@ describe("rag-worker.ts core logic", () => {
 
       expect(chunks[1]).toContain("[Codigo: FH900]");
       expect(chunks[1]).toContain("[Descricao: Farol Volvo]");
+    });
+
+    it("keeps row metadata for RAG reranking", () => {
+      const ws = xlsx.utils.json_to_sheet([
+        { Codigo: "A9604600105", Descricao: "Terminal Direcao" },
+      ]);
+      const wb = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(wb, ws, "Pecas");
+
+      const buffer = xlsx.write(wb, { type: "buffer", bookType: "xlsx" });
+      const [chunk] = parseExcelOrCsvChunks(buffer);
+
+      expect(chunk.metadata).toMatchObject({
+        parser: "spreadsheet",
+        sheet_name: "Pecas",
+        row_number: 2,
+      });
+      expect(chunk.metadata.references).toContain("A9604600105");
+    });
+  });
+
+  describe("extractPartReferences", () => {
+    it("normalizes repeated part references", () => {
+      expect(extractPartReferences("cod A 9604600105 e A9604600105")).toEqual([
+        "A9604600105",
+      ]);
     });
   });
 });

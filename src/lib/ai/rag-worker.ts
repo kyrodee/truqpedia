@@ -5,8 +5,24 @@ import { optionalEnv } from "@/lib/utils";
 
 const require = createRequire(import.meta.url);
 
+export type KnowledgeChunkInput = {
+  content: string;
+  metadata: Record<string, string | number | boolean | string[]>;
+};
+
 // 1. Recursive text splitter for PDFs/Documents
 export function splitTextRecursively(text: string, chunkSize = 1000, chunkOverlap = 200): string[] {
+  return splitTextIntoChunks(text, { parser: "plain_text" }, chunkSize, chunkOverlap).map(
+    (chunk) => chunk.content,
+  );
+}
+
+export function splitTextIntoChunks(
+  text: string,
+  baseMetadata: Record<string, string | number | boolean | string[]> = {},
+  chunkSize = 1000,
+  chunkOverlap = 200,
+): KnowledgeChunkInput[] {
   const chunks: string[] = [];
   const normalizedText = text.replace(/\r\n/g, "\n").trim();
   let start = 0;
@@ -46,14 +62,26 @@ export function splitTextRecursively(text: string, chunkSize = 1000, chunkOverla
     }
   }
 
-  return chunks;
+  return chunks.map((content, index) => ({
+    content,
+    metadata: {
+      ...baseMetadata,
+      chunk_index: index,
+      content_length: content.length,
+      references: extractPartReferences(content),
+    },
+  }));
 }
 
 // 2. Excel/CSV parser (row-based chunking)
 export function parseExcelOrCsv(buffer: Buffer): string[] {
+  return parseExcelOrCsvChunks(buffer).map((chunk) => chunk.content);
+}
+
+export function parseExcelOrCsvChunks(buffer: Buffer): KnowledgeChunkInput[] {
   const xlsx = require("xlsx") as typeof import("xlsx");
   const workbook = xlsx.read(buffer, { type: "buffer" });
-  const chunks: string[] = [];
+  const chunks: KnowledgeChunkInput[] = [];
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -68,7 +96,18 @@ export function parseExcelOrCsv(buffer: Buffer): string[] {
 
       if (fields.trim()) {
         // Formatos específicos para o RAG, relacionando o catálogo e a linha da tabela
-        chunks.push(`Catálogo: ${sheetName} | Linha ${i + 2}: ${fields}`);
+        const content = `Catalogo: ${sheetName} | Linha ${i + 2}: ${fields}`;
+        chunks.push({
+          content,
+          metadata: {
+            parser: "spreadsheet",
+            sheet_name: sheetName,
+            row_number: i + 2,
+            chunk_index: chunks.length,
+            content_length: content.length,
+            references: extractPartReferences(content),
+          },
+        });
       }
     }
   }
@@ -174,7 +213,7 @@ export async function processDocumentAsset(input: {
 
     // Stage 2: Extracting Text
     await updateStatus("processing", { stage: "extracting_text", progress: 30 });
-    let chunks: string[] = [];
+    let chunks: KnowledgeChunkInput[] = [];
 
     const isCsvOrExcel =
       input.mimeType.includes("csv") ||
@@ -183,20 +222,20 @@ export async function processDocumentAsset(input: {
       /\.(xlsx|xls|csv)$/i.test(input.fileName);
 
     if (isCsvOrExcel) {
-      chunks = parseExcelOrCsv(buffer);
+      chunks = parseExcelOrCsvChunks(buffer);
     } else if (input.mimeType.includes("pdf") || /\.pdf$/i.test(input.fileName)) {
       const fullText = await parsePdf(buffer);
       if (!fullText.trim()) {
         throw new Error("Could not extract any readable text from the PDF file.");
       }
-      chunks = splitTextRecursively(fullText);
+      chunks = splitTextIntoChunks(fullText, { parser: "pdf" });
     } else {
       // Treat as plain text
       const fullText = buffer.toString("utf-8");
       if (!fullText.trim()) {
         throw new Error("File is empty.");
       }
-      chunks = splitTextRecursively(fullText);
+      chunks = splitTextIntoChunks(fullText, { parser: "plain_text" });
     }
 
     if (chunks.length === 0) {
@@ -210,7 +249,9 @@ export async function processDocumentAsset(input: {
       total_chunks: chunks.length,
     });
 
-    const embeddings = await generateGeminiEmbeddings(chunks);
+    const embeddings = await generateGeminiEmbeddings(
+      chunks.map((chunk) => chunk.content),
+    );
 
     // Stage 4: Storing in database
     await updateStatus("processing", {
@@ -225,13 +266,14 @@ export async function processDocumentAsset(input: {
       .delete()
       .eq("document_id", input.documentId);
 
-    const rowsToInsert = chunks.map((content, index) => ({
+    const rowsToInsert = chunks.map((chunk, index) => ({
       collection_id: input.collectionId,
       document_id: input.documentId,
       owner_user_id: input.userId,
-      content,
+      content: chunk.content,
       embedding: embeddings[index], // Supabase vector column uses array representation
       metadata: {
+        ...chunk.metadata,
         file_name: input.fileName,
         chunk_index: index,
         total_chunks: chunks.length,
@@ -264,4 +306,26 @@ export async function processDocumentAsset(input: {
     });
     throw err;
   }
+}
+
+export function extractPartReferences(text: string) {
+  const matches =
+    text.match(/\b(?:[A-Z]{1,5}[-\s]?\d{3,}[A-Z0-9-]*|\d{6,14})\b/gi) ?? [];
+  const seen = new Set<string>();
+  const references: string[] = [];
+
+  for (const match of matches) {
+    const normalized = /^e\s+\d/i.test(match)
+      ? match.replace(/^e\s+/i, "").trim().toUpperCase()
+      : match.replace(/\s+/g, "").trim().toUpperCase();
+
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    references.push(normalized);
+  }
+
+  return references.slice(0, 20);
 }

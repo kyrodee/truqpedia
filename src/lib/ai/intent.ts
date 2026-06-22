@@ -5,11 +5,21 @@ import type {
   IntentRiskLevel,
   UploadedAttachment,
 } from "@/lib/types";
+import { GROQ_PRIMARY_MODEL } from "@/lib/constants";
+import { optionalEnv } from "@/lib/utils";
 
 type IntentInput = {
   message: string;
   attachments?: UploadedAttachment[];
   preferences?: AssistantPreferences;
+};
+
+type AiIntentPayload = {
+  intent?: string;
+  confidence?: number;
+  riskLevel?: string;
+  missingCriticalData?: unknown;
+  shouldAskClarifyingQuestion?: boolean;
 };
 
 type IntentProfile = {
@@ -359,6 +369,155 @@ export function classifyChatIntent(input: IntentInput): IntentClassification {
   });
 }
 
+export async function classifyChatIntentWithAi(
+  input: IntentInput,
+  options: { timeoutMs?: number; abortSignal?: AbortSignal } = {},
+): Promise<IntentClassification> {
+  const fallback = classifyChatIntent(input);
+  const apiKey = optionalEnv("GROQ_API_KEY");
+
+  if (!apiKey || fallback.id === "casual_conversation") {
+    return fallback;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? 4500,
+  );
+  const abortListener = () => controller.abort();
+
+  try {
+    options.abortSignal?.addEventListener("abort", abortListener, {
+      once: true,
+    });
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: GROQ_PRIMARY_MODEL,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "Classifique perguntas de autopecas e mecanica pesada. Responda somente JSON valido com intent, confidence, riskLevel, missingCriticalData e shouldAskClarifyingQuestion.",
+          },
+          {
+            role: "user",
+            content: buildIntentClassifierPrompt(input, fallback),
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return fallback;
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = data.choices?.[0]?.message?.content;
+
+    return content
+      ? parseIntentClassifierJson(content, fallback)
+      : fallback;
+  } catch {
+    return fallback;
+  } finally {
+    clearTimeout(timeout);
+    options.abortSignal?.removeEventListener("abort", abortListener);
+  }
+}
+
+export function buildIntentClassifierPrompt(
+  input: IntentInput,
+  fallback: IntentClassification = classifyChatIntent(input),
+) {
+  const attachments = (input.attachments ?? [])
+    .slice(0, 4)
+    .map((attachment) => ({
+      name: attachment.name,
+      type: attachment.type,
+      hasText: Boolean(attachment.text),
+      textPreview: attachment.text?.slice(0, 700),
+    }));
+
+  return JSON.stringify({
+    task:
+      "Classifique a intencao real do usuario para o Truqpedia. Use apenas os ids permitidos.",
+    allowedIntentIds: Object.keys(intentProfiles),
+    allowedRiskLevels: ["normal", "needs_confirmation", "high_risk"],
+    message: input.message,
+    attachments,
+    heuristicFallback: {
+      intent: fallback.id,
+      confidence: fallback.confidence,
+      riskLevel: fallback.riskLevel,
+      missingCriticalData: fallback.missingCriticalData,
+    },
+    rules: [
+      "marketplace_copy so quando o usuario quer texto pronto de venda/anuncio.",
+      "application_check quando pergunta se serve, aplica, encaixa ou pode anunciar como determinado veiculo.",
+      "cross_reference quando o foco e codigo, OEM, equivalente ou substituicao.",
+      "diagnosis quando ha sintoma, falha, barulho, vazamento ou comportamento mecanico.",
+      "high_risk para freio, direcao, suspensao, pneu, eixo, motor ou seguranca.",
+    ],
+    outputShape: {
+      intent: "um dos allowedIntentIds",
+      confidence: "numero entre 0 e 1",
+      riskLevel: "normal | needs_confirmation | high_risk",
+      missingCriticalData: ["strings curtas"],
+      shouldAskClarifyingQuestion: "boolean",
+    },
+  });
+}
+
+export function parseIntentClassifierJson(
+  raw: string,
+  fallback: IntentClassification,
+): IntentClassification {
+  const parsed = parseJsonObject(raw);
+
+  if (!parsed) {
+    return fallback;
+  }
+
+  const payload = parsed as AiIntentPayload;
+  const intent = isChatIntentId(payload.intent) ? payload.intent : fallback.id;
+  const riskLevel = isRiskLevel(payload.riskLevel)
+    ? payload.riskLevel
+    : fallback.riskLevel;
+  const confidence =
+    typeof payload.confidence === "number" && Number.isFinite(payload.confidence)
+      ? Math.min(0.96, Math.max(0.42, payload.confidence))
+      : fallback.confidence;
+  const missingCriticalData = Array.isArray(payload.missingCriticalData)
+    ? payload.missingCriticalData
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 6)
+    : fallback.missingCriticalData;
+
+  return buildClassification(intent, confidence, {
+    riskLevel,
+    missingCriticalData,
+    shouldAskClarifyingQuestion:
+      typeof payload.shouldAskClarifyingQuestion === "boolean"
+        ? payload.shouldAskClarifyingQuestion
+        : missingCriticalData.length > 0 &&
+          (confidence < 0.72 || riskLevel !== "normal"),
+  });
+}
+
 function buildClassification(
   intent: ChatIntentId,
   confidence: number,
@@ -649,4 +808,46 @@ function normalizeForIntent(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function parseJsonObject(raw: string) {
+  const clean = raw
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    const parsed: unknown = JSON.parse(clean);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch {
+    const match = clean.match(/\{[\s\S]*\}/);
+
+    if (!match) {
+      return null;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(match[0]);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed
+        : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function isChatIntentId(value: unknown): value is ChatIntentId {
+  return typeof value === "string" && value in intentProfiles;
+}
+
+function isRiskLevel(value: unknown): value is IntentRiskLevel {
+  return (
+    value === "normal" ||
+    value === "needs_confirmation" ||
+    value === "high_risk"
+  );
 }

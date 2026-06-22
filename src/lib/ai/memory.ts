@@ -103,9 +103,29 @@ export function buildConversationMemory(input: {
     [previous?.summary, historyContext, latestExchange].filter(Boolean).join(" "),
     1200,
   );
+  const partCodes = mergeUnique(
+    previous?.partCodes ?? [],
+    extractPartCodes([input.userMessage, input.assistantContent].join(" ")),
+  ).slice(0, 24);
+  const vehicles = mergeUnique(
+    previous?.vehicles ?? [],
+    extractVehicles([input.userMessage, input.assistantContent].join(" ")),
+  ).slice(0, 16);
+  const decisions = mergeUnique(
+    previous?.decisions ?? [],
+    extractDecisionNotes(input.assistantContent, input.intent),
+  ).slice(0, 10);
+  const businessPreferences = mergeUnique(
+    previous?.businessPreferences ?? [],
+    extractBusinessPreferences(input.userMessage),
+  ).slice(0, 8);
   const entities = mergeUnique(
     previous?.entities ?? [],
-    extractEntities([input.userMessage, input.assistantContent].join(" ")),
+    [
+      ...extractEntities([input.userMessage, input.assistantContent].join(" ")),
+      ...partCodes,
+      ...vehicles,
+    ],
   ).slice(0, 24);
   const openQuestions = mergeUnique(
     input.intent.missingCriticalData,
@@ -115,6 +135,10 @@ export function buildConversationMemory(input: {
   return {
     summary,
     entities,
+    partCodes,
+    vehicles,
+    decisions,
+    businessPreferences,
     openQuestions,
     lastIntent: input.intent.id,
     updatedAt: now.toISOString(),
@@ -129,6 +153,12 @@ export function memoryToPrompt(memory: ConversationMemory | null | undefined) {
   const lines = [
     memory.summary ? `Resumo: ${memory.summary}` : null,
     memory.entities.length ? `Entidades e codigos citados: ${memory.entities.join(", ")}` : null,
+    memory.partCodes?.length ? `Codigos de peca: ${memory.partCodes.join(", ")}` : null,
+    memory.vehicles?.length ? `Veiculos citados: ${memory.vehicles.join(", ")}` : null,
+    memory.decisions?.length ? `Decisoes anteriores: ${memory.decisions.join("; ")}` : null,
+    memory.businessPreferences?.length
+      ? `Preferencias comerciais: ${memory.businessPreferences.join("; ")}`
+      : null,
     memory.openQuestions.length
       ? `Pendencias recorrentes: ${memory.openQuestions.join("; ")}`
       : null,
@@ -163,6 +193,10 @@ function parseConversationMemory(content: string): ConversationMemory | null {
       summary: parsed.summary,
       openQuestions: parsed.openQuestions,
       entities: parsed.entities,
+      partCodes: parsed.partCodes,
+      vehicles: parsed.vehicles,
+      decisions: parsed.decisions,
+      businessPreferences: parsed.businessPreferences,
       lastIntent: parsed.lastIntent,
       updatedAt: parsed.updatedAt,
     };
@@ -184,6 +218,10 @@ function isMemoryLike(value: unknown): value is ConversationMemory {
     memory.openQuestions.every((item) => typeof item === "string") &&
     Array.isArray(memory.entities) &&
     memory.entities.every((item) => typeof item === "string") &&
+    isOptionalStringArray(memory.partCodes) &&
+    isOptionalStringArray(memory.vehicles) &&
+    isOptionalStringArray(memory.decisions) &&
+    isOptionalStringArray(memory.businessPreferences) &&
     typeof memory.updatedAt === "string"
   );
 }
@@ -193,19 +231,80 @@ function toStoredMemory(memory: ConversationMemoryRecord): ConversationMemory {
     summary: memory.summary,
     openQuestions: memory.openQuestions,
     entities: memory.entities,
+    partCodes: memory.partCodes ?? [],
+    vehicles: memory.vehicles ?? [],
+    decisions: memory.decisions ?? [],
+    businessPreferences: memory.businessPreferences ?? [],
     lastIntent: memory.lastIntent,
     updatedAt: memory.updatedAt,
   };
 }
 
 function extractEntities(text: string) {
-  const codeMatches = text.match(/\b[A-Z]{1,5}[-\s]?\d{3,}[A-Z0-9-]*\b/gi) ?? [];
-  const vehicleMatches =
-    text.match(/\b(?:volvo|scania|mercedes|mb|iveco|daf|vw|ford|man|sprinter|daily|cargo|constellation|atego|axor|accelo)\b/gi) ??
-    [];
-
-  return mergeUnique(codeMatches, vehicleMatches).map((item) =>
+  return mergeUnique(extractPartCodes(text), extractVehicles(text)).map((item) =>
     item.replace(/\s+/g, " ").trim(),
+  );
+}
+
+function extractPartCodes(text: string) {
+  return (
+    text.match(/\b(?:[A-Z]{1,5}[-\s]?\d{3,}[A-Z0-9-]*|\d{6,14})\b/gi) ?? []
+  ).map((item) => item.replace(/\s+/g, "").trim().toUpperCase());
+}
+
+function extractVehicles(text: string) {
+  const brandOrModel =
+    /\b(?:volvo|scania|mercedes|mb|iveco|daf|vw|ford|man|sprinter|daily|cargo|constellation|atego|axor|accelo|fh|fm|r440|p310|2426|1938|2544)\b/gi;
+  const years = text.match(/\b(?:19|20)\d{2}\b/g) ?? [];
+  const matches = text.match(brandOrModel) ?? [];
+
+  return mergeUnique(matches, years).map((item) =>
+    item.replace(/\s+/g, " ").trim(),
+  );
+}
+
+function extractDecisionNotes(
+  assistantContent: string,
+  intent: IntentClassification,
+) {
+  if (!["application_check", "cross_reference", "purchase_checklist"].includes(intent.id)) {
+    return [];
+  }
+
+  return assistantContent
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*\d.\s]+/, "").trim())
+    .filter((line) =>
+      /confirmar|provavel|nao cravar|compatibilidade|catalogo|chassi|vin/i.test(
+        line,
+      ),
+    )
+    .map((line) => compactForMemory(line, 180))
+    .slice(0, 4);
+}
+
+function extractBusinessPreferences(text: string) {
+  const preferences: string[] = [];
+
+  if (/whatsapp|zap/i.test(text)) {
+    preferences.push("prefere mensagens curtas para WhatsApp");
+  }
+
+  if (/marketplace|mercado livre|olx|anuncio/i.test(text)) {
+    preferences.push("usa respostas para anuncio de marketplace");
+  }
+
+  if (/balcao|cliente|fornecedor|cotacao/i.test(text)) {
+    preferences.push("trabalha com decisao de balcao/fornecedor");
+  }
+
+  return preferences;
+}
+
+function isOptionalStringArray(value: unknown) {
+  return (
+    value === undefined ||
+    (Array.isArray(value) && value.every((item) => typeof item === "string"))
   );
 }
 
